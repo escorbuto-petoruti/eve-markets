@@ -54,28 +54,37 @@ func (c *Client) RegionOrders(ctx context.Context, regionID int, orderType strin
 	case typeID < 0:
 		return nil, fmt.Errorf("%w: type id must not be negative", ErrInvalidInput)
 	}
-	path := "/markets/" + strconv.Itoa(regionID) + "/orders/"
-	var all []Order
+	q := url.Values{"order_type": {orderType}}
+	if typeID > 0 {
+		q.Set("type_id", strconv.Itoa(typeID))
+	}
+	all, _, err := c.pagedOrders(ctx, "", "/markets/"+strconv.Itoa(regionID)+"/orders/", q)
+	return all, err
+}
+
+// pagedOrders follows X-Pages up to maxMarketPages. truncated is true when
+// the cap stopped the loop before the last page.
+func (c *Client) pagedOrders(ctx context.Context, token, path string, base url.Values) (all []Order, truncated bool, err error) {
 	pages := 1
 	for page := 1; page <= pages && page <= maxMarketPages; page++ {
-		q := url.Values{"order_type": {orderType}, "page": {strconv.Itoa(page)}}
-		if typeID > 0 {
-			q.Set("type_id", strconv.Itoa(typeID))
+		q := url.Values{"page": {strconv.Itoa(page)}}
+		for k, v := range base {
+			q[k] = v
 		}
-		body, hdr, err := c.get(ctx, "", path, q)
+		body, hdr, err := c.get(ctx, token, path, q)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		var rows []Order
 		if err := json.Unmarshal(body, &rows); err != nil {
-			return nil, fmt.Errorf("esi: decode region orders: %w", err)
+			return nil, false, fmt.Errorf("esi: decode orders: %w", err)
 		}
 		all = append(all, rows...)
 		if n, err := strconv.Atoi(strings.TrimSpace(hdr.Get("X-Pages"))); err == nil && n > pages {
 			pages = n
 		}
 	}
-	return all, nil
+	return all, pages > maxMarketPages, nil
 }
 
 // RegionHistory returns the daily history of a type in a region. It sends no

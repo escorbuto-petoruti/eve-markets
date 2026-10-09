@@ -202,15 +202,19 @@ func runServe(ctx context.Context, args []string, d deps) int {
 	// A sign-in stores new credentials and scopes; the access token cached for
 	// that character carries the old ones.
 	var onTokenSaved func(int64)
-	if f, ok := d.newTokens(st).(interface{ Forget(int64) }); ok {
+	tokens := d.newTokens(st)
+	if f, ok := tokens.(interface{ Forget(int64) }); ok {
 		onTokenSaved = f.Forget
 	}
 
+	esiClient := esi.New(esi.Options{UserAgent: esiUserAgent()})
 	srv := &http.Server{
 		Handler: web.New(web.Deps{
 			Store:        st,
 			SSO:          d.newSSO(),
-			Markets:      esi.New(esi.Options{UserAgent: esiUserAgent()}),
+			Markets:      esiClient,
+			Structures:   esiClient,
+			Tokens:       tokens,
 			OnTokenSaved: onTokenSaved,
 			AllowedPort:  listenPort(ln.Addr().String()),
 		}),

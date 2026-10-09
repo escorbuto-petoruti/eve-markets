@@ -48,6 +48,20 @@ Then open <http://localhost:8089> and sign in. To use your own EVE application i
 
 Environment: `EVE_MARKETS_CLIENT_ID` (optional override of the embedded client id), `EVE_MARKETS_DB` (database path; the `--db` flag wins). The redirect URL is fixed to port 8089, so keep the default `--addr` port or SSO sign-in will not work.
 
+## Structure markets
+
+The page has a Structure market panel for player-structure (private) markets.
+ESI cannot list every market structure, so you either search by name (3
+characters or more, needs the `esi-search.search_structures.v1` scope) or type
+a structure id. Orders come from `GET /markets/structures/{id}/`, filtered by
+type on the server; a large market may be cut at 100 pages and is then flagged
+as truncated.
+
+A `403 no market access to this structure (docking/ACL)` means ESI refuses that
+character: it must be allowed to dock at the structure. Pick another character
+or ask the structure owner for access. If a character was added before the
+market scopes existed, re-add it to grant them.
+
 ## Development
 
 ```bash

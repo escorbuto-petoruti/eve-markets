@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -53,7 +54,7 @@ func (s *server) regionOrders(w http.ResponseWriter, r *http.Request, _ store.Us
 	}
 	orders, err := s.deps.Markets.RegionOrders(r.Context(), region, kind, typeID)
 	if err != nil {
-		upstreamError(w, err)
+		upstreamError(w, r, err)
 		return
 	}
 	if orders == nil {
@@ -81,7 +82,7 @@ func (s *server) regionHistory(w http.ResponseWriter, r *http.Request, _ store.U
 	}
 	days, err := s.deps.Markets.RegionHistory(r.Context(), region, typeID)
 	if err != nil {
-		upstreamError(w, err)
+		upstreamError(w, r, err)
 		return
 	}
 	if days == nil {
@@ -92,13 +93,14 @@ func (s *server) regionHistory(w http.ResponseWriter, r *http.Request, _ store.U
 
 // upstreamError maps an ESI failure to a generic response: 429 with
 // Retry-After for rate limits, 400 for rejected input, 502 otherwise. The
-// upstream message is never forwarded.
-func upstreamError(w http.ResponseWriter, err error) {
+// upstream message is never forwarded to the client, only logged.
+func upstreamError(w http.ResponseWriter, r *http.Request, err error) {
 	var rl *esi.RateLimitError
 	switch {
 	case errors.Is(err, context.Canceled):
 		return
 	case errors.As(err, &rl):
+		slog.Warn("esi rate limited", "path", r.URL.Path, "err", err)
 		if rl.RetryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(rl.RetryAfter.Seconds()))))
 		}
@@ -106,6 +108,7 @@ func upstreamError(w http.ResponseWriter, err error) {
 	case errors.Is(err, esi.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, "invalid request")
 	default:
+		slog.Error("esi request failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusBadGateway, "ESI request failed")
 	}
 }

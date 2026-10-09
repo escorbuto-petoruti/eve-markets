@@ -52,6 +52,24 @@
     <p id="market-status" class="warn" role="status" aria-live="polite"></p>
     <div class="table-wrap"><table id="market-table"></table></div>
   </section>
+
+  <section id="structures" class="card" aria-labelledby="structures-title" hidden>
+    <h2 id="structures-title">Structure market</h2>
+    <form id="structure-form" class="market-form">
+      <label>Character <select id="structure-char"></select></label>
+      <label>Name search <input id="structure-q" type="search" minlength="3" placeholder="at least 3 characters"></label>
+      <button type="button" id="structure-search">Search</button>
+    </form>
+    <ul id="structure-results"></ul>
+    <form id="structure-id-form" class="market-form">
+      <label>Structure id <input id="structure-id" type="number" min="1"></label>
+      <label>Type id (optional) <input id="structure-type" type="number" min="1"></label>
+      <button type="button" id="structure-orders">Orders</button>
+    </form>
+    <p class="muted">ESI cannot list every market structure: search by name or enter an id. A character that cannot dock at the structure gets 403 (no market access).</p>
+    <p id="structure-status" class="warn" role="status" aria-live="polite"></p>
+    <div class="table-wrap"><table id="structure-table"></table></div>
+  </section>
 </main>
 <script src="/static/app.js"></script>
 </body>
