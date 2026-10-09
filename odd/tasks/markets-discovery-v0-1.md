@@ -32,9 +32,10 @@ Direction of the project is open. Learn what ESI returns for public and alliance
 
 ## Progress / evidence
 - Explorer map of eve-wallets completed (2026-10-09).
-- T1 done (writer, 2026-10-09), not committed yet. Copied/trimmed: sso (defaults: empty client id, port 8089, MarketScopes), auth, update, esi core (get/postJSON/ETag/errors/UniverseNames), store (fresh single migration: users/tokens/sessions), web skeleton (login/callback/add-character/confirm-move, /api/me, minimal static page), cmd serve/help/version/update, scripts, workflows, install.sh/ps1 (shortcut logic removed), README. internal/scheduler skipped (collection-job oriented, not needed).
+- T1 done (writer, 2026-10-09). Copied/trimmed: sso (defaults: empty client id, port 8089, MarketScopes), auth, update, esi core (get/postJSON/ETag/errors/UniverseNames), store (fresh single migration: users/tokens/sessions), web skeleton (login/callback/add-character/confirm-move, /api/me, minimal static page), cmd serve/help/version/update, scripts, workflows, install.sh/ps1 (shortcut logic removed), README. internal/scheduler skipped (collection-job oriented, not needed).
 - Verification: gofmt -l . empty; go vet ./... clean; go test -count=1 ./... all packages ok; CGO_ENABLED=0 go build ./cmd/eve-markets ok; rg wallet|journal|loyalty|8088 only hits SQLite journal_mode, the origin credit comments, and negative-test fixtures.
 - Not run: scripts/test-install-ps1.sh (pwsh not installed locally; CI runs it with REQUIRE_PWSH=1). install.sh --systemd unit has no EVE_MARKETS_CLIENT_ID, so the service would exit with the clear missing-client-id message until the user adds it.
 
 ## Next step
 T2: public markets (region orders and history).
+- T1 commit: 638065e (feat: scaffold eve-markets from the eve-wallets base). Review assess: high (executable mode, auth, update, process start, shell); consent granted; native START refused with lens_context_budget_exceeded (9636 lines, evidence exceeds budget). Outcome: review pending owner decision (split into smaller commits vs continue unreviewed).
