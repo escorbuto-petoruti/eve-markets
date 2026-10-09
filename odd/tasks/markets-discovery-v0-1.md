@@ -25,7 +25,8 @@ Direction of the project is open. Learn what ESI returns for public and alliance
 
 ## Route declaration
 - T1: delegated (writer); trigger: 2+ non-trivial files, preparation read of eve-wallets.
-- T2, T3: decided when reached.
+- T2: delegated (writer), test-first.
+- T3: delegated (writer); trigger: 2+ non-trivial files (esi, web, ui, tests).
 
 ## Acceptance
 - Builds with CGO_ENABLED=0; tests pass; no wallets-specific code left; live sign-in verified once the EVE app is registered (pending owner action).
@@ -42,3 +43,8 @@ Direction of the project is open. Learn what ESI returns for public and alliance
 T3: structure markets (discovery, orders, 403 handling).
 - T1 commit: 638065e (feat: scaffold eve-markets from the eve-wallets base). Review assess: high (executable mode, auth, update, process start, shell); consent granted; native START refused with lens_context_budget_exceeded (9636 lines, evidence exceeds budget). Outcome: review pending owner decision (split into smaller commits vs continue unreviewed).
 - T2 commit: 8d2a689. Native review (4 lenses, high risk, consent granted): approved and acknowledged; 13 non-blocking advisory findings kept as follow-ups (candidates: upstream error logging in web/markets.go, serial pagination latency and truncation in esi/markets.go, UI error handling in static/app.js:69-89, main.go:213). T1 (638065e) stays unreviewed: native START refused with lens_context_budget_exceeded.
+
+## T3 design notes (2026-10-09)
+- ESI has no endpoint listing all market structures. Discovery = search by name (GET /characters/{id}/search/?categories=structure, min 3 chars, scope esi-search.search_structures.v1) plus direct structure id entry; names via GET /universe/structures/{id}/ (403 tolerated per structure); orders via GET /markets/structures/{id}/ (paginated, no type filter, so filter by type_id server-side).
+- A character used in the API must belong to the signed-in user; missing scope or ReauthError gives a clear re-login message; ESI 403 means no docking/ACL access.
+- Orders responses expose a truncated flag when the page cap is hit (advisory R4-truncation applied to the new code only).
