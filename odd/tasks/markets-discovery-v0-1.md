@@ -41,3 +41,4 @@ Direction of the project is open. Learn what ESI returns for public and alliance
 ## Next step
 T3: structure markets (discovery, orders, 403 handling).
 - T1 commit: 638065e (feat: scaffold eve-markets from the eve-wallets base). Review assess: high (executable mode, auth, update, process start, shell); consent granted; native START refused with lens_context_budget_exceeded (9636 lines, evidence exceeds budget). Outcome: review pending owner decision (split into smaller commits vs continue unreviewed).
+- T2 commit: 8d2a689. Native review (4 lenses, high risk, consent granted): approved and acknowledged; 13 non-blocking advisory findings kept as follow-ups (candidates: upstream error logging in web/markets.go, serial pagination latency and truncation in esi/markets.go, UI error handling in static/app.js:69-89, main.go:213). T1 (638065e) stays unreviewed: native START refused with lens_context_budget_exceeded.
