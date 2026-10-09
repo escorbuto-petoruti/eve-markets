@@ -1,0 +1,185 @@
+#!/bin/sh
+# Run install.ps1 against a locally served fake release (needs pwsh and python3).
+#
+#   scripts/test-install-ps1.sh
+#
+# Without pwsh it skips (exit 0) unless REQUIRE_PWSH=1, which CI sets.
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if ! command -v pwsh >/dev/null 2>&1; then
+	if [ "${REQUIRE_PWSH:-0}" = 1 ]; then
+		echo "pwsh is required" >&2
+		exit 1
+	fi
+	echo "SKIP: pwsh not found, install.ps1 was not run"
+	exit 0
+fi
+command -v python3 >/dev/null 2>&1 || {
+	echo "python3 is required" >&2
+	exit 1
+}
+
+WORK=$(mktemp -d)
+SERVER_PID=
+cleanup() {
+	[ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true
+	rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
+
+V=9.9.9
+REL="$WORK/rel/download/v$V"
+mkdir -p "$REL"
+python3 - "$REL" "$V" <<'PY'
+import hashlib, sys, zipfile
+rel, v = sys.argv[1], sys.argv[2]
+name = f"eve-markets_{v}_windows_amd64.zip"
+with zipfile.ZipFile(f"{rel}/{name}", "w") as z:
+    z.writestr("eve-markets.exe", "fake exe\n")
+    z.writestr("LICENSE", "mit\n")
+h = hashlib.sha256(open(f"{rel}/{name}", "rb").read()).hexdigest()
+open(f"{rel}/checksums.txt", "w").write(f"{h}  {name}\n")
+PY
+# A second release whose checksum does not match, and one with no zip at all.
+BAD="$WORK/rel/download/v8.8.8"
+mkdir -p "$BAD" "$WORK/rel/download/v7.7.7"
+cp "$REL/eve-markets_${V}_windows_amd64.zip" "$BAD/eve-markets_8.8.8_windows_amd64.zip"
+printf '%s  eve-markets_8.8.8_windows_amd64.zip\n' \
+	0000000000000000000000000000000000000000000000000000000000000000 >"$BAD/checksums.txt"
+
+cat >"$WORK/server.py" <<'PY'
+import functools, http.server, sys
+root = sys.argv[1]
+class H(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/latest":
+            self.send_response(302)
+            self.send_header("Location", "/tag/v9.9.9")
+            self.end_headers()
+        elif self.path.startswith("/tag/"):
+            self.send_response(200)
+            self.end_headers()
+        else:
+            super().do_GET()
+    def log_message(self, *a):
+        pass
+srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(H, directory=root))
+open(sys.argv[2], "w").write(str(srv.server_address[1]))
+srv.serve_forever()
+PY
+python3 "$WORK/server.py" "$WORK/rel" "$WORK/port" &
+SERVER_PID=$!
+i=0
+while [ ! -s "$WORK/port" ]; do
+	i=$((i + 1))
+	[ "$i" -lt 100 ] || {
+		echo "fake server did not start" >&2
+		exit 1
+	}
+	sleep 0.1
+done
+BASE="http://127.0.0.1:$(cat "$WORK/port")"
+
+fail=0
+# Drop every variable install.ps1 reads so the caller's environment cannot leak into a case.
+clean_env() {
+	env -u VERSION -u INSTALL_DIR -u LOCALAPPDATA -u EVE_MARKETS_RELEASE_BASE \
+		-u EVE_MARKETS_TEST_ARCH -u EVE_MARKETS_TEST_FAIL_REPLACE \
+		-u EVE_MARKETS_ADD_TO_PATH -u EVE_MARKETS_TEST_PATH_FILE "$@"
+}
+# run <name> <expected rc> <expected output substring> [ENV=VALUE ...]
+run() {
+	name=$1 want_rc=$2 want_out=$3
+	shift 3
+	rc=0 last_ok=0
+	out=$(clean_env "$@" EVE_MARKETS_RELEASE_BASE="$BASE" pwsh -NoProfile -NonInteractive -File "$ROOT/install.ps1" 2>&1) || rc=$?
+	if [ "$rc" = "$want_rc" ] && printf '%s' "$out" | grep -qF -- "$want_out"; then
+		echo "ok   $name"
+		last_ok=1
+	else
+		echo "FAIL $name (rc=$rc, want $want_rc, want output ~ '$want_out')"
+		printf '%s\n' "$out" | sed 's/^/     /'
+		fail=1
+	fi
+}
+
+D="$WORK/inst"
+run "latest release installs" 0 "installed" INSTALL_DIR="$D"
+if [ "$last_ok" = 1 ]; then
+	[ -f "$D/eve-markets.exe" ] || { echo "FAIL exe missing"; fail=1; }
+fi
+run "reinstall keeps previous binary" 0 "checksum ok" INSTALL_DIR="$D" VERSION=9.9.9
+[ -f "$D/eve-markets.exe.bak-prev" ] || { echo "FAIL bak-prev missing"; fail=1; }
+ls "$D"/.eve-markets.* >/dev/null 2>&1 && { echo "FAIL temp file left behind"; fail=1; }
+
+D2="$WORK/inst-mismatch"
+run "checksum mismatch aborts" 1 "checksum mismatch" INSTALL_DIR="$D2" VERSION=v8.8.8
+[ ! -e "$D2/eve-markets.exe" ] || { echo "FAIL installed despite mismatch"; fail=1; }
+
+D3="$WORK/inst-arch"
+run "unsupported architecture" 1 "unsupported architecture" INSTALL_DIR="$D3" EVE_MARKETS_TEST_ARCH=Arm64
+[ ! -e "$D3/eve-markets.exe" ] || { echo "FAIL installed on arm64"; fail=1; }
+
+run "missing asset" 1 "download failed" INSTALL_DIR="$WORK/inst-missing" VERSION=v7.7.7
+
+# A failed replacement must leave the installed exe and the older backup alone.
+D4="$WORK/inst-locked"
+run "seed install" 0 "installed" INSTALL_DIR="$D4"
+printf 'older backup\n' >"$D4/eve-markets.exe.bak-prev"
+printf 'running exe\n' >"$D4/eve-markets.exe"
+run "failed replace keeps backup and exe" 1 "stop it" INSTALL_DIR="$D4" EVE_MARKETS_TEST_FAIL_REPLACE=1
+[ "$(cat "$D4/eve-markets.exe.bak-prev")" = "older backup" ] || { echo "FAIL old backup was overwritten"; fail=1; }
+[ "$(cat "$D4/eve-markets.exe")" = "running exe" ] || { echo "FAIL installed exe was not restored"; fail=1; }
+ls "$D4"/.eve-markets.* >/dev/null 2>&1 && { echo "FAIL temp file left behind"; fail=1; }
+
+# PATH opt-in. EVE_MARKETS_TEST_PATH_FILE stands in for the user-scope PATH value.
+D5="$WORK/inst-path"
+PF="$WORK/userpath.txt"
+printf '/usr/bin' >"$PF"
+run "PATH default without a terminal changes nothing" 0 "not added" INSTALL_DIR="$D5" EVE_MARKETS_TEST_PATH_FILE="$PF"
+[ "$(cat "$PF")" = "/usr/bin" ] || { echo "FAIL PATH changed without consent"; fail=1; }
+run "PATH default prints how to add it" 0 "EVE_MARKETS_ADD_TO_PATH=1" INSTALL_DIR="$D5" EVE_MARKETS_TEST_PATH_FILE="$PF"
+run "PATH =0 never adds" 0 "not added" INSTALL_DIR="$D5" EVE_MARKETS_TEST_PATH_FILE="$PF" EVE_MARKETS_ADD_TO_PATH=0
+[ "$(cat "$PF")" = "/usr/bin" ] || { echo "FAIL PATH changed with =0"; fail=1; }
+run "PATH =1 adds the install dir" 0 "added $D5 to your user PATH" INSTALL_DIR="$D5" EVE_MARKETS_TEST_PATH_FILE="$PF" EVE_MARKETS_ADD_TO_PATH=1
+[ "$(cat "$PF")" = "/usr/bin;$D5" ] || { echo "FAIL PATH value: $(cat "$PF")"; fail=1; }
+run "PATH second run does not duplicate" 0 "open a new terminal to run eve-markets from anywhere" INSTALL_DIR="$D5/" EVE_MARKETS_TEST_PATH_FILE="$PF" EVE_MARKETS_ADD_TO_PATH=1
+[ "$(cat "$PF")" = "/usr/bin;$D5" ] || { echo "FAIL PATH duplicated: $(cat "$PF")"; fail=1; }
+
+# Existing entries are kept byte-for-byte (unexpanded %VAR% references included).
+D6="$WORK/inst-keep"
+PF2="$WORK/userpath-keep.txt"
+printf '%s' '%USERPROFILE%\bin;C:\tools' >"$PF2"
+run "PATH keeps other entries untouched" 0 "added $D6 to your user PATH" INSTALL_DIR="$D6" EVE_MARKETS_TEST_PATH_FILE="$PF2" EVE_MARKETS_ADD_TO_PATH=1
+[ "$(cat "$PF2")" = '%USERPROFILE%\bin;C:\tools'";$D6" ] || { echo "FAIL PATH entries changed: $(cat "$PF2")"; fail=1; }
+
+# An entry written with a %VAR% that expands to the install dir counts as present.
+D7="$WORK/inst-exp/bin"
+PF3="$WORK/userpath-exp.txt"
+printf '%s' '%LOCALAPPDATA%/bin' >"$PF3"
+run "PATH entry with %VAR% equal to the install dir is not duplicated" 0 "open a new terminal to run eve-markets from anywhere" INSTALL_DIR="$D7" LOCALAPPDATA="$WORK/inst-exp" EVE_MARKETS_TEST_PATH_FILE="$PF3" EVE_MARKETS_ADD_TO_PATH=1
+[ "$(cat "$PF3")" = '%LOCALAPPDATA%/bin' ] || { echo "FAIL PATH duplicated via %VAR%: $(cat "$PF3")"; fail=1; }
+
+# User PATH only: this terminal cannot see it, so it must not claim it is already there.
+out=$(clean_env INSTALL_DIR="$D5" EVE_MARKETS_TEST_PATH_FILE="$PF" EVE_MARKETS_RELEASE_BASE="$BASE" pwsh -NoProfile -NonInteractive -File "$ROOT/install.ps1" 2>&1) || true
+if printf '%s' "$out" | grep -qF "already on your PATH"; then echo "FAIL user-PATH-only claims already on PATH"; fail=1; else echo "ok   user-PATH-only does not say already on your PATH"; fi
+# Session PATH contains the install dir.
+D9="$WORK/inst-session"
+run "install dir in the session PATH says already on your PATH" 0 "already on your PATH" INSTALL_DIR="$D9" PATH="$D9:$PATH" EVE_MARKETS_TEST_PATH_FILE="$WORK/userpath-none.txt"
+# In neither source: still prints the hint.
+run "dir in neither PATH still prints the hint" 0 "was not added to your PATH" INSTALL_DIR="$WORK/inst-neither" EVE_MARKETS_TEST_PATH_FILE="$WORK/userpath-none2.txt"
+
+# iex mode must not kill the host shell and must still report the error.
+rc=0
+out=$(clean_env INSTALL_DIR="$WORK/inst-iex" VERSION=v7.7.7 EVE_MARKETS_RELEASE_BASE="$BASE" \
+	pwsh -NoProfile -NonInteractive -Command "Get-Content -Raw '$ROOT/install.ps1' | Invoke-Expression; 'host shell alive'" 2>&1) || rc=$?
+if printf '%s' "$out" | grep -q "download failed" && printf '%s' "$out" | grep -q "host shell alive"; then
+	echo "ok   iex mode survives a failure"
+else
+	echo "FAIL iex mode (rc=$rc)"
+	printf '%s\n' "$out" | sed 's/^/     /'
+	fail=1
+fi
+
+exit "$fail"

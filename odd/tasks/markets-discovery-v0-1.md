@@ -1,0 +1,40 @@
+# Feature: markets-discovery-v0-1
+
+## Objective
+Local Go server (loopback, SQLite, EVE SSO PKCE, multi-character) that shows what ESI offers for markets: public region markets and private (structure) markets reachable by the signed-in characters. Read-only, discovery-first.
+
+## Why
+Direction of the project is open. Learn what ESI returns for public and alliance-internal markets before designing snapshots or analysis.
+
+## Scope (authorized by owner: "arrancamos con ese alcance")
+- Reuse the eve-wallets base (sso, auth, esi core, store users/tokens/sessions, web skeleton, release tooling).
+- Public: region orders and history per type.
+- Private: list market-capable structures per character, show their orders.
+- Out of scope: snapshots, charts, wallets, Windows double-click (no-args serve, Quit button, shutdown endpoint, shortcuts).
+
+## Constraints
+- Module `github.com/escorbuto-petoruti/eve-markets`, identity escorbuto-petoruti, conventional commits, no AI attribution.
+- Redirect `http://localhost:8089/auth/callback` (8088 belongs to eve-wallets). Client id via `EVE_MARKETS_CLIENT_ID`, never hardcoded until the owner registers the EVE app.
+- Scopes: esi-markets.structure_markets.v1, esi-search.search_structures.v1, esi-universe.read_structures.v1.
+- Planning heuristic ~400 authored changed lines per task; copied code counts as a single scaffold unit.
+
+## Tasks
+- [x] T1 Scaffold from eve-wallets: module, sso/auth/update, esi core (get, cache, errors), store (users/tokens/sessions, fresh migrations), web skeleton + login/add-character, cmd serve, scripts, workflows, LICENSE, README. Check: `go vet`, `go test ./...` green.
+- [ ] T2 Public markets: esi region orders (paginated via X-Pages) and history, web API + minimal page. Test-first with httptest fakes.
+- [ ] T3 Structure markets: structure discovery (search + universe/structures), structure orders paginated, 403 handling (no docking access), web API + page.
+
+## Route declaration
+- T1: delegated (writer); trigger: 2+ non-trivial files, preparation read of eve-wallets.
+- T2, T3: decided when reached.
+
+## Acceptance
+- Builds with CGO_ENABLED=0; tests pass; no wallets-specific code left; live sign-in verified once the EVE app is registered (pending owner action).
+
+## Progress / evidence
+- Explorer map of eve-wallets completed (2026-10-09).
+- T1 done (writer, 2026-10-09), not committed yet. Copied/trimmed: sso (defaults: empty client id, port 8089, MarketScopes), auth, update, esi core (get/postJSON/ETag/errors/UniverseNames), store (fresh single migration: users/tokens/sessions), web skeleton (login/callback/add-character/confirm-move, /api/me, minimal static page), cmd serve/help/version/update, scripts, workflows, install.sh/ps1 (shortcut logic removed), README. internal/scheduler skipped (collection-job oriented, not needed).
+- Verification: gofmt -l . empty; go vet ./... clean; go test -count=1 ./... all packages ok; CGO_ENABLED=0 go build ./cmd/eve-markets ok; rg wallet|journal|loyalty|8088 only hits SQLite journal_mode, the origin credit comments, and negative-test fixtures.
+- Not run: scripts/test-install-ps1.sh (pwsh not installed locally; CI runs it with REQUIRE_PWSH=1). install.sh --systemd unit has no EVE_MARKETS_CLIENT_ID, so the service would exit with the clear missing-client-id message until the user adds it.
+
+## Next step
+T2: public markets (region orders and history).

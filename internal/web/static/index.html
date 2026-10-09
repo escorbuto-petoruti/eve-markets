@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>EVE markets</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <h1>EVE markets</h1>
+    <div id="user-bar" class="user-bar" hidden>
+      <span class="muted">Signed in as <strong id="user-name"></strong></span>
+      <a class="button" href="/auth/add-character">Add character</a>
+      <form method="post" action="/auth/logout">
+        <button type="submit">Sign out</button>
+      </form>
+    </div>
+  </div>
+</header>
+<main>
+  <section id="signed-out" class="card" aria-labelledby="signed-out-title" hidden>
+    <h2 id="signed-out-title">Sign in</h2>
+    <p id="session-message" class="warn" role="status" aria-live="polite"></p>
+    <p>Sign in with your EVE Online character to explore market data.</p>
+    <p><a class="button primary" href="/auth/login">Sign in with EVE Online</a></p>
+  </section>
+
+  <section id="signed-in" class="card" aria-labelledby="characters-title" hidden>
+    <h2 id="characters-title">Signed-in characters</h2>
+    <ul id="characters"></ul>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

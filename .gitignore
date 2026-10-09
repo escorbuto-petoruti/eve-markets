@@ -1,0 +1,11 @@
+# local data
+*.db
+*.db-wal
+*.db-shm
+.idea/
+.atl/
+
+# build output
+/eve-markets
+/cmd/eve-markets/eve-markets
+/dist/
