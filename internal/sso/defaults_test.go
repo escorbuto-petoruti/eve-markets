@@ -8,8 +8,8 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.ClientID != "" {
-		t.Errorf("ClientID = %q, want empty (supplied by EVE_MARKETS_CLIENT_ID)", cfg.ClientID)
+	if cfg.ClientID != "cda14518a2b4474499c44f0ee75cf942" {
+		t.Errorf("ClientID = %q, want the embedded public client id", cfg.ClientID)
 	}
 	if cfg.RedirectURL != "http://localhost:8089/auth/callback" {
 		t.Errorf("RedirectURL = %q", cfg.RedirectURL)

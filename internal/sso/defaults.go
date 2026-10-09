@@ -1,10 +1,9 @@
 package sso
 
 const (
-	// DefaultClientID is empty on purpose: every user registers their own EVE
-	// application (PKCE public client) and passes its id through the
-	// EVE_MARKETS_CLIENT_ID environment variable.
-	DefaultClientID = ""
+	// DefaultClientID is the embedded EVE application id. It is a public PKCE
+	// client id, not a secret; EVE_MARKETS_CLIENT_ID overrides it.
+	DefaultClientID = "cda14518a2b4474499c44f0ee75cf942"
 	// DefaultRedirectURL is the callback the EVE application must register.
 	DefaultRedirectURL = "http://localhost:8089/auth/callback"
 )
@@ -22,9 +21,9 @@ func MarketScopes() []string {
 	return []string{scopeStructureMarkets, scopeSearchStructures, scopeReadStructures}
 }
 
-// DefaultConfig returns the embedded client configuration. ClientID is empty
-// until the caller supplies one. Every other field is zero so tests and callers
-// can override it.
+// DefaultConfig returns the embedded client configuration. ClientID is the
+// embedded public client. Every other field is zero so tests and callers can
+// override it.
 func DefaultConfig() Config {
 	return Config{
 		ClientID:    DefaultClientID,

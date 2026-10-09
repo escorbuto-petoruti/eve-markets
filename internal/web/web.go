@@ -23,6 +23,8 @@ type Deps struct {
 	Store *store.Store
 	// SSO signs users in. Without it /auth/login answers 503.
 	SSO SSO
+	// Markets reads public market data. Without it the market endpoints answer 503.
+	Markets Markets
 	// Now is the clock; it defaults to time.Now.
 	Now func() time.Time
 	// OnLogin runs after a successful sign-in with the user id. It may be nil.
@@ -70,6 +72,8 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("POST /auth/cancel-move", s.cancelMove)
 	mux.HandleFunc("POST /auth/logout", s.logout)
 	mux.HandleFunc("/api/me", requireUser(s.me))
+	mux.HandleFunc("GET /api/markets/regions/{region}/orders", requireUser(s.regionOrders))
+	mux.HandleFunc("GET /api/markets/regions/{region}/history", requireUser(s.regionHistory))
 	return s.guard(s.withSession(mux))
 }
 
