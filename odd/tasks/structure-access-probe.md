@@ -34,3 +34,4 @@ gofmt/vet/test green; CGO_ENABLED=0 build; migration applied on an existing DB w
 
 ## Next step
 Parent commits T1; owner runs the live check.
+- T1 commit: 00d247e. Review: medium (688 lines), consent granted, reliability lens approved and acknowledged. Advisories (non-blocking follow-ups): web/structures.go:201-213, 203-204, 222-233, 252-254 (probe/cache edge paths) and store/store.go:49. Not verified live: ESI probe behavior, UI.
