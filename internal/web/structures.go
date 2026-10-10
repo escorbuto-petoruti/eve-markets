@@ -31,9 +31,9 @@ const (
 	// accessTTL is how long a yes/no market-access answer is trusted.
 	accessTTL = 24 * time.Hour
 
-	accessYes     = "yes"
-	accessNo      = "no"
-	accessUnknown = "unknown"
+	accessYes      = "yes"
+	accessNoMarket = "no_market"
+	accessUnknown  = "unknown"
 )
 
 // Structures reads private structure markets. *esi.Client implements it.
@@ -41,7 +41,7 @@ type Structures interface {
 	SearchStructures(ctx context.Context, token string, characterID int64, query string) ([]int64, error)
 	Structure(ctx context.Context, token string, structureID int64) (esi.StructureInfo, error)
 	StructureOrders(ctx context.Context, token string, structureID int64) ([]esi.Order, bool, error)
-	ProbeStructureMarket(ctx context.Context, token string, structureID int64) (esi.ProbeResult, error)
+	ProbeStructureMarket(ctx context.Context, token string, structureID int64) (esi.Probe, error)
 	UniverseNames(ctx context.Context, ids []int64) (map[int64]string, error)
 }
 
@@ -106,11 +106,12 @@ func positiveID(s string) (int64, bool) {
 	return n, err == nil && n > 0
 }
 
-// structureError answers an upstream failure of a structure call; an ESI 403
-// means the character may not dock or has no market access there.
+// structureError answers an upstream failure of a structure call. ESI does not
+// document what its 403 means for a structure market; most likely the structure
+// has no market service, so the message does not claim a docking problem.
 func structureError(w http.ResponseWriter, r *http.Request, err error) {
 	if esi.IsForbidden(err) {
-		writeError(w, http.StatusForbidden, "no market access to this structure (docking/ACL)")
+		writeError(w, http.StatusForbidden, "ESI refused the market read for this structure (it likely has no market service, or this character has no market access)")
 		return
 	}
 	upstreamError(w, r, err)
@@ -119,8 +120,13 @@ func structureError(w http.ResponseWriter, r *http.Request, err error) {
 type structureHit struct {
 	ID   int64   `json:"id"`
 	Name *string `json:"name"`
-	// MarketAccess is yes, no or unknown (probe failed or was skipped).
+	// MarketAccess is yes, no_market (ESI refused the market read, most likely
+	// no market service) or unknown (probe failed or was skipped).
 	MarketAccess string `json:"market_access"`
+	// MarketStatus and MarketDetail are what ESI answered to the probe (HTTP
+	// status, error text); 0 and "" when unknown or cached before they were kept.
+	MarketStatus int    `json:"market_status"`
+	MarketDetail string `json:"market_detail"`
 }
 
 // structureSearch serves GET /api/structures/search?character_id=&q=.
@@ -182,7 +188,7 @@ func (s *server) structureSearch(w http.ResponseWriter, r *http.Request, u store
 		case accessUnknown:
 			return 1
 		}
-		return 2
+		return 2 // no_market
 	}
 	slices.SortStableFunc(hits, func(a, b structureHit) int { return rank(a) - rank(b) })
 	writeJSON(w, r, http.StatusOK, hits)
@@ -199,14 +205,16 @@ func (s *server) probeAccess(ctx context.Context, token string, charID int64, hi
 	for i := range hits {
 		hits[i].MarketAccess = accessUnknown
 		if !refresh {
-			acc, at, found, err := s.deps.Store.GetStructureAccess(ctx, charID, hits[i].ID)
+			cached, found, err := s.deps.Store.GetStructureAccessDetail(ctx, charID, hits[i].ID)
 			if err != nil {
 				slog.Error("read structure access cache", "character_id", charID, "structure_id", hits[i].ID, "err", err)
-			} else if found && now.Sub(at) < accessTTL {
-				hits[i].MarketAccess = accessNo
-				if acc {
+			} else if found && now.Sub(cached.CheckedAt) < accessTTL {
+				hits[i].MarketAccess = accessNoMarket
+				if cached.Accessible {
 					hits[i].MarketAccess = accessYes
 				}
+				hits[i].MarketStatus = cached.HTTPStatus
+				hits[i].MarketDetail = cached.Detail
 				continue
 			}
 		}
@@ -244,12 +252,15 @@ func (s *server) probeAccess(ctx context.Context, token string, charID int64, hi
 				}
 				return
 			}
-			yes := res == esi.ProbeYes
-			hits[i].MarketAccess = accessNo
+			yes := res.Result == esi.ProbeYes
+			hits[i].MarketAccess = accessNoMarket
 			if yes {
 				hits[i].MarketAccess = accessYes
 			}
-			if err := s.deps.Store.SaveStructureAccess(ctx, charID, id, yes, now); err != nil {
+			hits[i].MarketStatus = res.Status
+			hits[i].MarketDetail = res.Detail
+			rec := store.StructureAccess{Accessible: yes, CheckedAt: now, HTTPStatus: res.Status, Detail: res.Detail}
+			if err := s.deps.Store.SaveStructureAccessDetail(ctx, charID, id, rec); err != nil {
 				slog.Error("cache structure access", "character_id", charID, "structure_id", id, "err", err)
 			}
 		}()

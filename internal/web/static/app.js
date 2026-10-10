@@ -124,10 +124,10 @@
   function structStatus(text) { $("structure-status").textContent = text; }
 
   var lastHits = null;
-  var accessLabel = { yes: "accessible", no: "no access", unknown: "unknown" };
+  var accessLabel = { yes: "Market", no_market: "No market", unknown: "Unknown" };
 
-  // renderStructureHits lists lastHits (already ordered by the API: accessible
-  // first), hiding everything but "yes" when the filter is checked.
+  // renderStructureHits lists lastHits (already ordered by the API: with a market
+  // first, then unknown, then no market), hiding everything but "yes" when the filter is checked.
   function renderStructureHits() {
     var list = $("structure-results");
     list.replaceChildren();
@@ -136,13 +136,18 @@
     var shown = lastHits.filter(function (h) { return !only || h.market_access === "yes"; });
     var unknown = lastHits.filter(function (h) { return h.market_access === "unknown"; }).length;
     structStatus(shown.length + " of " + lastHits.length + (lastHits.length === 1 ? " structure" : " structures") +
-      " shown." + (unknown ? " " + unknown + " with unknown access (check failed or was rate limited); try Refresh access later." : ""));
+      " shown." + (unknown ? " " + unknown + " with an unknown market state (check failed or was rate limited); try Re-check markets later." : ""));
     shown.forEach(function (h) {
       var access = accessLabel[h.market_access] ? h.market_access : "unknown";
       var li = document.createElement("li");
       var badge = document.createElement("span");
       badge.className = "badge badge-" + access;
       badge.textContent = accessLabel[access];
+      if (access === "no_market") {
+        var tip = "ESI refused the market read (most likely no market service installed)";
+        if (h.market_status) { tip += ". ESI answered HTTP " + h.market_status + (h.market_detail ? ": " + h.market_detail : ""); }
+        badge.title = tip;
+      }
       var b = document.createElement("button");
       b.type = "button";
       b.textContent = (h.name || "(name hidden)") + " [" + h.id + "]";
@@ -179,7 +184,7 @@
   function watchedStatus(text) { $("watched-status").textContent = text; }
 
   var watchStatusLabel = {
-    ok: "ok", truncated: "truncated (partial data)", forbidden: "no market access",
+    ok: "ok", truncated: "truncated (partial data)", forbidden: "ESI refused the market read",
     needs_reauth: "character must sign in again", rate_limited: "rate limited", error: "error"
   };
 
@@ -229,7 +234,7 @@
     $("structure-results").replaceChildren();
     $("structure-table").replaceChildren();
     if (q.length < 3) { structStatus("Type at least 3 characters to search."); return; }
-    structStatus(refresh ? "Re-checking access..." : "Searching...");
+    structStatus(refresh ? "Re-checking markets..." : "Searching...");
     var url = "/api/structures/search?character_id=" + encodeURIComponent($("structure-char").value) +
       "&q=" + encodeURIComponent(q) + (refresh ? "&refresh=1" : "");
     getJSON(url).then(function (hits) {
@@ -255,8 +260,8 @@
         (body.truncated ? ". Truncated: the page cap was reached, so this list is incomplete." : "."));
       renderTable(structOrderCols, rows, $("structure-table"));
     }).catch(function (err) {
-      structStatus("Error: " + err.message + (/market access/.test(err.message) ?
-        " Only characters that can dock at the structure can read its market." : ""));
+      structStatus("Error: " + err.message + (/refused the market read/.test(err.message) ?
+        " Search lists structures you can dock at; a refusal most likely means this structure has no market service." : ""));
     });
   }
 

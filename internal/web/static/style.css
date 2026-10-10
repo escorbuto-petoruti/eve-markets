@@ -83,5 +83,5 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #structure-results li { display: flex; gap: 8px; align-items: center; margin: .2rem 0; }
 .badge { font-size: .75rem; padding: .05rem .5rem; border-radius: 999px; border: 1px solid var(--border); min-width: 5.5rem; text-align: center; }
 .badge-yes { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.badge-no { color: var(--bad); }
+.badge-no_market { color: var(--bad); }
 .badge-unknown { color: var(--warn); }

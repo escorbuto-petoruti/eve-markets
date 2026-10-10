@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -116,16 +117,22 @@ func TestStructureOrdersTruncatedAtCap(t *testing.T) {
 
 func TestProbeStructureMarket(t *testing.T) {
 	cases := []struct {
-		name    string
-		status  int
-		want    ProbeResult
-		wantErr bool
+		name       string
+		status     int
+		body       string
+		want       ProbeResult
+		wantStatus int
+		wantDetail string
+		wantErr    bool
 	}{
-		{"open", http.StatusOK, ProbeYes, false},
-		{"forbidden", http.StatusForbidden, ProbeNo, false},
-		{"not found", http.StatusNotFound, ProbeNo, false},
-		{"server error", http.StatusInternalServerError, "", true},
-		{"bad gateway", http.StatusBadGateway, "", true},
+		{"open", http.StatusOK, `[]`, ProbeYes, 200, "", false},
+		{"forbidden", http.StatusForbidden, `{"error":"Market access denied"}`, ProbeNo, 403, "Market access denied", false},
+		{"not found", http.StatusNotFound, `{"error":"Structure not found"}`, ProbeNo, 404, "Structure not found", false},
+		{"forbidden without body", http.StatusForbidden, ``, ProbeNo, 403, "", false},
+		{"forbidden long and control chars", http.StatusForbidden, `{"error":"` + strings.Repeat("x", 300) + `\u0007\n"}`, ProbeNo, 403, strings.Repeat("x", 200), false},
+		{"forbidden echoing the token", http.StatusForbidden, `{"error":"bad ` + testToken + ` here"}`, ProbeNo, 403, "bad [redacted] here", false},
+		{"server error", http.StatusInternalServerError, `{"error":"boom"}`, "", 0, "", true},
+		{"bad gateway", http.StatusBadGateway, ``, "", 0, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,13 +144,11 @@ func TestProbeStructureMarket(t *testing.T) {
 					t.Errorf("page = %q, want 1", got)
 				}
 				w.WriteHeader(tc.status)
-				if tc.status == http.StatusOK {
-					_, _ = w.Write([]byte(`[]`))
-				}
+				_, _ = w.Write([]byte(tc.body))
 			})
 			got, err := c.ProbeStructureMarket(context.Background(), testToken, 1000000000001)
-			if (err != nil) != tc.wantErr || got != tc.want {
-				t.Fatalf("got %q, %v; want %q, err=%v", got, err, tc.want, tc.wantErr)
+			if (err != nil) != tc.wantErr || got.Result != tc.want || got.Status != tc.wantStatus || got.Detail != tc.wantDetail {
+				t.Fatalf("got %+v, %v; want %q %d %q, err=%v", got, err, tc.want, tc.wantStatus, tc.wantDetail, tc.wantErr)
 			}
 		})
 	}
@@ -157,8 +162,8 @@ func TestProbeStructureMarketRateLimit(t *testing.T) {
 		})
 		got, err := c.ProbeStructureMarket(context.Background(), testToken, 5)
 		var rl *RateLimitError
-		if !errors.As(err, &rl) || rl.Status != status || got != "" {
-			t.Errorf("status %d: got %q, %v", status, got, err)
+		if !errors.As(err, &rl) || rl.Status != status || got != (Probe{}) {
+			t.Errorf("status %d: got %+v, %v", status, got, err)
 		}
 	}
 }

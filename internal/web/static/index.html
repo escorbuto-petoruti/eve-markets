@@ -59,21 +59,21 @@
       <label>Character <select id="structure-char"></select></label>
       <label>Name search <input id="structure-q" type="search" minlength="3" placeholder="at least 3 characters"></label>
       <button type="button" id="structure-search">Search</button>
-      <button type="button" id="structure-refresh">Refresh access</button>
-      <label class="inline"><input id="structure-only" type="checkbox"> Only accessible</label>
+      <button type="button" id="structure-refresh">Re-check markets</button>
+      <label class="inline"><input id="structure-only" type="checkbox"> Only with a market</label>
     </form>
-    <p class="muted">Checking access reads one orders page per structure (up to 20 per search); answers are remembered for 24 hours. A name in the list does not imply market access.</p>
+    <p class="muted">Search lists structures you can dock at. Each result is checked by reading one orders page (up to 20 per search); answers are remembered for 24 hours. "No market" means ESI refused the market read, most likely because the structure has no market service installed. Hover the badge to see what ESI answered.</p>
     <ul id="structure-results"></ul>
     <form id="structure-id-form" class="market-form">
       <label>Structure id <input id="structure-id" type="number" min="1"></label>
       <label>Type id (optional) <input id="structure-type" type="number" min="1"></label>
       <button type="button" id="structure-orders">Orders</button>
     </form>
-    <p class="muted">ESI cannot list every market structure: search by name or enter an id. A character that cannot dock at the structure gets 403 (no market access).</p>
+    <p class="muted">ESI cannot list every market structure: search by name or enter an id. ESI refuses the read (403 or 404) when the structure has no market service or the character has no market access.</p>
     <p id="structure-status" class="warn" role="status" aria-live="polite"></p>
     <div class="table-wrap"><table id="structure-table"></table></div>
     <h3 id="watched-title">Watched structures</h3>
-    <p class="muted">While the app runs, the orders of watched structures are collected periodically (see <code>--collect-interval</code>) and changes between collections are stored. Use Watch on an accessible search result.</p>
+    <p class="muted">While the app runs, the orders of watched structures are collected periodically (see <code>--collect-interval</code>) and changes between collections are stored. Use Watch on a search result that has a market.</p>
     <p id="watched-status" class="warn" role="status" aria-live="polite"></p>
     <ul id="watched-list" aria-labelledby="watched-title"></ul>
   </section>

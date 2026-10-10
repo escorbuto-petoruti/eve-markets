@@ -95,6 +95,10 @@ var migrations = []string{
 	);
 	CREATE INDEX order_events_at ON order_events (structure_id, at);
 	CREATE INDEX order_events_type_at ON order_events (structure_id, type_id, at);`,
+	// 4: what ESI answered to the market probe (HTTP status and the error
+	// text of its body). Rows stored before this migration keep NULL.
+	`ALTER TABLE structure_access ADD COLUMN http_status INTEGER;
+		ALTER TABLE structure_access ADD COLUMN detail TEXT;`,
 }
 
 // Store is a SQLite-backed store.

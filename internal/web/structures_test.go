@@ -44,6 +44,7 @@ type fakeStructures struct {
 
 	// probe results by structure id; a missing id probes as "yes".
 	probe         map[int64]esi.ProbeResult
+	probeFull     map[int64]esi.Probe
 	probeErr      map[int64]error
 	probeIDs      []int64
 	probeInflight atomic.Int32
@@ -81,7 +82,7 @@ func (f *fakeStructures) Structure(_ context.Context, token string, id int64) (e
 	return f.info[id], nil
 }
 
-func (f *fakeStructures) ProbeStructureMarket(_ context.Context, token string, id int64) (esi.ProbeResult, error) {
+func (f *fakeStructures) ProbeStructureMarket(_ context.Context, token string, id int64) (esi.Probe, error) {
 	f.note(token)
 	f.mu.Lock()
 	f.probeIDs = append(f.probeIDs, id)
@@ -96,12 +97,18 @@ func (f *fakeStructures) ProbeStructureMarket(_ context.Context, token string, i
 	}
 	time.Sleep(5 * time.Millisecond)
 	if err := f.probeErr[id]; err != nil {
-		return "", err
+		return esi.Probe{}, err
+	}
+	if p, ok := f.probeFull[id]; ok {
+		return p, nil
 	}
 	if r, ok := f.probe[id]; ok {
-		return r, nil
+		if r == esi.ProbeNo {
+			return esi.Probe{Result: r, Status: 403}, nil
+		}
+		return esi.Probe{Result: r, Status: 200}, nil
 	}
-	return esi.ProbeYes, nil
+	return esi.Probe{Result: esi.ProbeYes, Status: 200}, nil
 }
 
 func (f *fakeStructures) probed() []int64 {
@@ -197,11 +204,11 @@ func TestStructureSearchResolvesNames(t *testing.T) {
 			t.Errorf("legacy accessible field still present: %v", row)
 		}
 	}
-	// yes first, then no, stable within a group: 101 (yes), 102, 103 (no).
+	// yes first, then no_market, stable within a group: 101 (yes), 102, 103 (no_market).
 	if got[0]["id"] != float64(101) || got[0]["name"] != "Alpha" || got[0]["market_access"] != "yes" {
 		t.Errorf("row 0 = %v", got[0])
 	}
-	if got[1]["id"] != float64(102) || got[1]["name"] != nil || got[1]["market_access"] != "no" {
+	if got[1]["id"] != float64(102) || got[1]["name"] != nil || got[1]["market_access"] != "no_market" {
 		t.Errorf("row 1 = %v", got[1])
 	}
 	if s.gotChar != 1 || s.gotQuery != "alp" || s.gotToken != "access-token-xyz" {
@@ -412,7 +419,7 @@ func TestStructureOrdersUpstreamErrors(t *testing.T) {
 		code  int
 		match string
 	}{
-		{"forbidden", &esi.APIError{Status: 403, Message: "secret detail"}, http.StatusForbidden, "no market access to this structure"},
+		{"forbidden", &esi.APIError{Status: 403, Message: "secret detail"}, http.StatusForbidden, "ESI refused the market read"},
 		{"rate limit", &esi.RateLimitError{Status: 429, RetryAfter: 7 * time.Second}, http.StatusTooManyRequests, "rate limiting"},
 		{"other", errors.New("dial tcp: secret internal detail"), http.StatusBadGateway, "ESI request failed"},
 	}
@@ -462,9 +469,9 @@ func TestStructureSearchOrdersByAccess(t *testing.T) {
 		order = append(order, int64(r["id"].(float64)))
 	}
 	if want := []int64{2, 5, 3, 1, 4}; !slices.Equal(order, want) {
-		t.Errorf("order = %v, want %v (yes, unknown, no; stable)", order, want)
+		t.Errorf("order = %v, want %v (yes, unknown, no_market; stable)", order, want)
 	}
-	if got := accessOf(rows); got[3] != "unknown" || got[2] != "yes" || got[1] != "no" {
+	if got := accessOf(rows); got[3] != "unknown" || got[2] != "yes" || got[1] != "no_market" {
 		t.Errorf("access = %v", got)
 	}
 }
@@ -490,7 +497,7 @@ func TestStructureSearchCachesDefinitiveAnswersFor24h(t *testing.T) {
 	if got := s.probed(); !slices.Equal(got, []int64{3}) {
 		t.Errorf("second search probed %v, want only [3]", got)
 	}
-	if got := accessOf(rows); got[1] != "yes" || got[2] != "no" || got[3] != "yes" {
+	if got := accessOf(rows); got[1] != "yes" || got[2] != "no_market" || got[3] != "yes" {
 		t.Errorf("access = %v", got)
 	}
 	// After the TTL everything is probed again.
@@ -520,7 +527,7 @@ func TestStructureSearchRefreshBypassesCache(t *testing.T) {
 	if n := len(s.probed()); n != 2 {
 		t.Errorf("refresh probed %d, want 2", n)
 	}
-	if got := accessOf(rows); got[1] != "no" {
+	if got := accessOf(rows); got[1] != "no_market" {
 		t.Errorf("refresh did not update access: %v", got)
 	}
 }
@@ -604,5 +611,50 @@ func TestStructureSearchNameErrorStillFailsRequest(t *testing.T) {
 	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
 	if rec := do(f.h, http.MethodGet, "/api/structures/search?character_id=1&q=abc"); rec.Code == http.StatusOK {
 		t.Errorf("status = %d, want an error", rec.Code)
+	}
+}
+
+func TestStructureSearchReportsAndCachesESIAnswer(t *testing.T) {
+	s := &fakeStructures{
+		searchIDs: []int64{1, 2},
+		info:      map[int64]esi.StructureInfo{1: {Name: "a"}, 2: {Name: "b"}},
+		probeFull: map[int64]esi.Probe{
+			1: {Result: esi.ProbeNo, Status: 404, Detail: "Structure not found"},
+			2: {Result: esi.ProbeYes, Status: 200},
+		},
+	}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	const target = "/api/structures/search?character_id=1&q=abc"
+	check := func(label string, rows []map[string]any) {
+		t.Helper()
+		by := map[int64]map[string]any{}
+		for _, r := range rows {
+			by[int64(r["id"].(float64))] = r
+		}
+		if by[1]["market_access"] != "no_market" || by[1]["market_status"] != float64(404) || by[1]["market_detail"] != "Structure not found" {
+			t.Errorf("%s: no_market row = %v", label, by[1])
+		}
+		if by[2]["market_access"] != "yes" || by[2]["market_detail"] != "" {
+			t.Errorf("%s: yes row = %v", label, by[2])
+		}
+	}
+	check("fresh", searchRows(t, f, target))
+	s.probeIDs = nil
+	check("cached", searchRows(t, f, target))
+	if n := len(s.probed()); n != 0 {
+		t.Errorf("cached search probed %d, want 0", n)
+	}
+}
+
+func TestStructureSearchUnknownHasNoStatus(t *testing.T) {
+	s := &fakeStructures{
+		searchIDs: []int64{1},
+		info:      map[int64]esi.StructureInfo{1: {Name: "a"}},
+		probeErr:  map[int64]error{1: &esi.APIError{Status: 502}},
+	}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	rows := searchRows(t, f, "/api/structures/search?character_id=1&q=abc")
+	if rows[0]["market_access"] != "unknown" || rows[0]["market_status"] != float64(0) || rows[0]["market_detail"] != "" {
+		t.Errorf("row = %v", rows[0])
 	}
 }

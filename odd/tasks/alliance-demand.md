@@ -36,6 +36,8 @@ gofmt/vet/test green; CGO_ENABLED=0 build; migrations applied on an existing DB 
   - Not verified live: real ESI collection, browser UI (Watch/Unwatch buttons), a 429 backoff against ESI, migration on a real user database.
   - Commit: pending (parent commits).
 
+- T1b: no_market wording + probe status/detail recorded (migration 4). Owner clarified that search lists structures the character can dock at, so `no` became `no_market` (ESI refused the market read, most likely no market service). Probe now returns `esi.Probe{Result,Status,Detail}`; `structure_access` gained nullable `http_status`/`detail`; search results carry `market_status`/`market_detail` (tooltip on the badge). RED observed (esi, store, web tests failed to compile on the missing Probe/StructureAccess types). Not verified live: real ESI 403/404 error bodies (what `error` text ESI sends), the browser tooltip, migration 4 on a real user database.
+
 ## Next step
 Review/commit T1, then launch the T2 writer.
 - T1 commit: 63270d3. Review: medium (1629 lines), consent granted, reliability lens approved and acknowledged. Advisories (non-blocking): collector.go:143-162 and 85-117 (run/collect edge paths), collector_test.go:106-140 (coverage), README.md:100-101. Known deviations: a structure watched by two characters is fetched once per watch (no dedupe); last_seen only changes when a row changes. Not verified live: real ESI collection, 429 backoff, migration 3 on a real DB.

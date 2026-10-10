@@ -57,20 +57,29 @@ a structure id. Orders come from `GET /markets/structures/{id}/`, filtered by
 type on the server; a large market may be cut at 100 pages and is then flagged
 as truncated.
 
-Search results carry a market access badge. A name in the list does **not**
-imply access: the app probes `GET /markets/structures/{id}/?page=1` for each
-result (at most 20 per search, 4 at a time, one orders page each) and shows
-`accessible` (200), `no access` (403 or 404) or `unknown`. Accessible
-structures are listed first, and "Only accessible" hides the rest. Definitive
-answers are remembered per character for 24 hours; "Refresh access" re-probes
-ignoring that memory. `unknown` means the check failed (network or ESI error) or
-ESI rate limited the probes, so the remaining results were not checked; it is
-never remembered, so searching again or Refresh access later retries it.
+The structure search lists the structures where the character has docking
+permission. Not all of them have a market, so each result carries a badge: the
+app probes `GET /markets/structures/{id}/?page=1` (at most 20 per search, 4 at
+a time, one orders page each) and shows `yes` (200), `no_market` ("No market",
+403 or 404: ESI refused the market read, most likely because the structure has
+no market service installed) or `unknown`. Structures with a market are listed
+first, then unknown, then no market; "Only with a market" hides the rest.
+Definitive answers are remembered per character for 24 hours; "Re-check
+markets" re-probes ignoring that memory. `unknown` means the check failed
+(network or ESI error) or ESI rate limited the probes, so the remaining
+results were not checked; it is never remembered, so searching again or
+Re-check markets later retries it.
 
-A `403 no market access to this structure (docking/ACL)` means ESI refuses that
-character: it must be allowed to dock at the structure. Pick another character
-or ask the structure owner for access. If a character was added before the
-market scopes existed, re-add it to grant them.
+ESI does not document what its 403 and 404 mean here, so the app records what
+it answered: the search results carry `market_status` (the HTTP status, 0 when
+unknown) and `market_detail` (the `error` text of ESI's body, at most 200
+printable characters), the latter shown as a tooltip on the "No market" badge.
+Answers cached before this was recorded have neither.
+
+A `403 ESI refused the market read for this structure` on the orders view has
+the same meaning: most likely the structure has no market service, or the
+character has no market access. If a character was added before the market
+scopes existed, re-add it to grant them.
 
 ## Collecting watched structures
 
@@ -96,7 +105,7 @@ emits no events. Event kinds:
   be told apart; it is never counted as a sale on its own)
 
 Each watch shows its last status: `ok`, `truncated` (the page cap was reached,
-so nothing is marked `gone`), `forbidden` (no docking access), `needs_reauth`
+so nothing is marked `gone`), `forbidden` (ESI refused the market read), `needs_reauth`
 (sign that character in again), `rate_limited` or `error`. After a rate limit
 the collector waits the `Retry-After` before the next run. Unwatching stops the
 collection and keeps what was stored.
