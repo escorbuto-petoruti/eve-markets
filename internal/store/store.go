@@ -52,6 +52,49 @@ var migrations = []string{
 		checked_at   INTEGER NOT NULL,
 		PRIMARY KEY (character_id, structure_id)
 	);`,
+	// 3: structure demand collection. watched_structures is the watchlist per
+	// character; orders_current holds the open orders of a structure as of the
+	// last collection; order_events is the append-only log of changes between
+	// collections (ESI has no history, demand is inferred from these).
+	`CREATE TABLE watched_structures (
+		character_id INTEGER NOT NULL REFERENCES tokens(character_id) ON DELETE CASCADE,
+		structure_id INTEGER NOT NULL,
+		name         TEXT,
+		created_at   INTEGER NOT NULL,
+		last_run_at  INTEGER,
+		last_status  TEXT,
+		last_error   TEXT,
+		PRIMARY KEY (character_id, structure_id)
+	);
+	CREATE TABLE orders_current (
+		structure_id  INTEGER NOT NULL,
+		order_id      INTEGER NOT NULL,
+		type_id       INTEGER NOT NULL,
+		is_buy        INTEGER NOT NULL,
+		price         REAL    NOT NULL,
+		volume_remain INTEGER NOT NULL,
+		volume_total  INTEGER NOT NULL,
+		issued        TEXT    NOT NULL,
+		duration      INTEGER NOT NULL,
+		first_seen    INTEGER NOT NULL,
+		last_seen     INTEGER NOT NULL,
+		PRIMARY KEY (structure_id, order_id)
+	);
+	CREATE INDEX orders_current_type ON orders_current (structure_id, type_id);
+	CREATE TABLE order_events (
+		id            INTEGER PRIMARY KEY,
+		structure_id  INTEGER NOT NULL,
+		order_id      INTEGER NOT NULL,
+		type_id       INTEGER NOT NULL,
+		is_buy        INTEGER NOT NULL,
+		at            INTEGER NOT NULL,
+		kind          TEXT    NOT NULL CHECK (kind IN ('new', 'fill', 'price', 'gone')),
+		price         REAL    NOT NULL,
+		volume_remain INTEGER NOT NULL,
+		delta_volume  INTEGER NOT NULL
+	);
+	CREATE INDEX order_events_at ON order_events (structure_id, at);
+	CREATE INDEX order_events_type_at ON order_events (structure_id, type_id, at);`,
 }
 
 // Store is a SQLite-backed store.

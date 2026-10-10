@@ -72,6 +72,10 @@
     <p class="muted">ESI cannot list every market structure: search by name or enter an id. A character that cannot dock at the structure gets 403 (no market access).</p>
     <p id="structure-status" class="warn" role="status" aria-live="polite"></p>
     <div class="table-wrap"><table id="structure-table"></table></div>
+    <h3 id="watched-title">Watched structures</h3>
+    <p class="muted">While the app runs, the orders of watched structures are collected periodically (see <code>--collect-interval</code>) and changes between collections are stored. Use Watch on an accessible search result.</p>
+    <p id="watched-status" class="warn" role="status" aria-live="polite"></p>
+    <ul id="watched-list" aria-labelledby="watched-title"></ul>
   </section>
 </main>
 <script src="/static/app.js"></script>

@@ -215,7 +215,7 @@ func TestOnlyTheKeptCommandsExist(t *testing.T) {
 			t.Errorf("%s: stderr = %q", cmd, h.err.String())
 		}
 	}
-	if strings.Contains(usage, "Quit") || strings.Contains(usage, "collect") {
+	if strings.Contains(usage, "Quit") || strings.Contains(usage, "eve-markets collect") {
 		t.Errorf("usage mentions removed features: %s", usage)
 	}
 }
@@ -515,5 +515,35 @@ func TestServeWarnsWhenThePortIsNotTheRegisteredOne(t *testing.T) {
 	}
 	if strings.Contains(h.out.String(), "SSO login will not work") {
 		t.Error("the warning belongs on stderr")
+	}
+}
+
+func TestServeRejectsBadCollectInterval(t *testing.T) {
+	for _, v := range []string{"30s", "-1m", "abc"} {
+		h := newHarness(t, serveEnv())
+		if got := run(context.Background(), []string{"serve", "--collect-interval", v}, h.deps); got != 2 {
+			t.Errorf("%s: exit = %d, want 2", v, got)
+		}
+		select {
+		case <-h.listeners:
+			t.Errorf("%s: must not listen", v)
+		default:
+		}
+	}
+}
+
+func TestServeAcceptsCollectIntervalZeroAndMinimum(t *testing.T) {
+	for _, v := range []string{"0", "1m"} {
+		h := newHarness(t, serveEnv())
+		_, cancel, done := startServe(t, h, "--no-open", "--collect-interval", v)
+		cancel()
+		select {
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("%s: exit = %d; stderr = %q", v, code, h.err.String())
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: serve did not stop", v)
+		}
 	}
 }

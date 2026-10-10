@@ -26,6 +26,7 @@
       li.textContent = c.name;
       list.appendChild(li);
     });
+    loadWatched();
     var sel = $("structure-char");
     sel.replaceChildren();
     (me.characters || []).forEach(function (c) {
@@ -148,8 +149,78 @@
       b.addEventListener("click", function () { $("structure-id").value = h.id; });
       li.appendChild(badge);
       li.appendChild(b);
+      if (access === "yes") {
+        var w = document.createElement("button");
+        w.type = "button";
+        w.textContent = "Watch";
+        w.addEventListener("click", function () { watchStructure(h); });
+        li.appendChild(w);
+      }
       list.appendChild(li);
     });
+  }
+
+  // postJSON sends a same-origin JSON POST; like getJSON it resolves null after
+  // a 401 and rejects with the API's own error message.
+  function postJSON(url, payload) {
+    return fetch(url, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (body) {
+        if (resp.status === 401) { showSignedOut("Your session expired."); return null; }
+        if (!resp.ok) { throw new Error(body.error || "HTTP " + resp.status); }
+        return body;
+      });
+    });
+  }
+
+  function watchedStatus(text) { $("watched-status").textContent = text; }
+
+  var watchStatusLabel = {
+    ok: "ok", truncated: "truncated (partial data)", forbidden: "no market access",
+    needs_reauth: "character must sign in again", rate_limited: "rate limited", error: "error"
+  };
+
+  function renderWatched(items) {
+    var list = $("watched-list");
+    list.replaceChildren();
+    watchedStatus(items.length ? "" : "No watched structures yet.");
+    items.forEach(function (x) {
+      var li = document.createElement("li");
+      var label = x.last_run_at ? (watchStatusLabel[x.last_status] || x.last_status) : "not collected yet";
+      var text = (x.name || "(name hidden)") + " [" + x.structure_id + "] - " + label;
+      if (x.last_run_at) { text += ", " + new Date(x.last_run_at * 1000).toLocaleString(); }
+      text += ", " + x.order_count + (x.order_count === 1 ? " order" : " orders");
+      if (x.last_error) { text += " (" + x.last_error + ")"; }
+      var span = document.createElement("span");
+      span.textContent = text + " ";
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "Unwatch";
+      b.addEventListener("click", function () {
+        postJSON("/api/unwatch", { character_id: x.character_id, structure_id: x.structure_id })
+          .then(function (r) { if (r) { loadWatched(); } })
+          .catch(function (err) { watchedStatus("Error: " + err.message); });
+      });
+      li.appendChild(span);
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+  }
+
+  function loadWatched() {
+    return getJSON("/api/watched").then(function (items) {
+      if (items) { renderWatched(items); }
+    }).catch(function (err) { watchedStatus("Error: " + err.message); });
+  }
+
+  function watchStructure(h) {
+    postJSON("/api/watch", {
+      character_id: Number($("structure-char").value), structure_id: h.id, name: h.name || ""
+    }).then(function (r) { if (r) { loadWatched(); } })
+      .catch(function (err) { watchedStatus("Error: " + err.message); });
   }
 
   function loadStructureSearch(refresh) {

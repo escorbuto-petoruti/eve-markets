@@ -19,11 +19,14 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/escorbuto-petoruti/eve-markets/internal/auth"
+	"github.com/escorbuto-petoruti/eve-markets/internal/collector"
 	"github.com/escorbuto-petoruti/eve-markets/internal/esi"
+	"github.com/escorbuto-petoruti/eve-markets/internal/scheduler"
 	"github.com/escorbuto-petoruti/eve-markets/internal/sso"
 	"github.com/escorbuto-petoruti/eve-markets/internal/store"
 	"github.com/escorbuto-petoruti/eve-markets/internal/web"
@@ -35,19 +38,24 @@ var version = "dev"
 const (
 	defaultAddr   = "127.0.0.1:8089"
 	shutdownGrace = 10 * time.Second
+
+	defaultCollectInterval = 15 * time.Minute
+	minCollectInterval     = time.Minute
 )
 
 const usage = `Usage:
   eve-markets help
   eve-markets version
   eve-markets update [--check] [--force]
-  eve-markets serve [--addr 127.0.0.1:8089] [--db PATH] [--open | --no-open]
+  eve-markets serve [--addr 127.0.0.1:8089] [--db PATH] [--collect-interval 15m] [--open | --no-open]
 
 Commands:
   help     print this help
   version  print the version
   update   replace the binary with the latest GitHub release (linux and macOS)
   serve    serve the markets page on a loopback address;
+           it also collects the orders of watched structures every --collect-interval
+           (minimum 1m, 0 disables the collector);
            on Windows in a terminal it opens the page in your browser (--no-open stops it, --open forces it elsewhere)
 
 Environment:
@@ -170,8 +178,13 @@ func runServe(ctx context.Context, args []string, d deps) int {
 	dbFlag := fset.String("db", "", "database path")
 	openFlag := fset.Bool("open", false, "open the page in the browser (default on Windows in a terminal)")
 	noOpen := fset.Bool("no-open", false, "do not open the page in the browser")
+	collectEvery := fset.Duration("collect-interval", defaultCollectInterval, "how often watched structures are collected (minimum 1m, 0 disables)")
 	if code, stop := parseFlags(fset, args); stop {
 		return code
+	}
+	if *collectEvery != 0 && *collectEvery < minCollectInterval {
+		fmt.Fprintf(d.stderr, "eve-markets: --collect-interval must be 0 (off) or at least %s\n", minCollectInterval)
+		return 2
 	}
 	if *openFlag && *noOpen {
 		fmt.Fprintln(d.stderr, "eve-markets: --open and --no-open cannot be used together")
@@ -224,6 +237,17 @@ func runServe(ctx context.Context, args []string, d deps) int {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 16,
 	}
+	collectCtx, stopCollect := context.WithCancel(ctx)
+	defer stopCollect()
+	var collecting sync.WaitGroup
+	if *collectEvery > 0 {
+		deps := collector.Deps{Store: st, ESI: esiClient, Tokens: tokens}
+		collecting.Add(1)
+		go func() {
+			defer collecting.Done()
+			scheduler.Loop(collectCtx, *collectEvery, func(c context.Context) error { return collector.Run(c, deps) })
+		}()
+	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
 	fmt.Fprintf(d.stdout, "Serving on http://%s (database %s)\n", ln.Addr(), path)
@@ -263,6 +287,9 @@ func runServe(ctx context.Context, args []string, d deps) int {
 		fmt.Fprintf(d.stderr, "eve-markets: shutdown: %v\n", err)
 		code = 1
 	}
+	// The collector uses the store: wait for it before the deferred Close.
+	stopCollect()
+	collecting.Wait()
 	return code
 }
 

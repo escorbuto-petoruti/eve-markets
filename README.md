@@ -72,6 +72,35 @@ character: it must be allowed to dock at the structure. Pick another character
 or ask the structure owner for access. If a character was added before the
 market scopes existed, re-add it to grant them.
 
+## Collecting watched structures
+
+ESI only shows the current orders of a structure, never history. To study what
+is demanded in a private market, press **Watch** on a search result that has
+market access. While `eve-markets serve` runs it fetches the orders of every
+watched structure on a timer, one structure at a time, with the token of the
+character that watches it.
+
+```bash
+eve-markets serve --collect-interval 15m   # default; minimum 1m, 0 disables
+```
+
+Per structure the database keeps the current open orders (`orders_current`)
+and an event log of changes between two collections (`order_events`), not full
+snapshots. The first collection of a structure only stores the baseline and
+emits no events. Event kinds:
+
+- `new`: an order appeared (delta = its remaining volume)
+- `fill`: the remaining volume dropped (delta = units filled)
+- `price`: the price changed (a volume increase alone is just an update)
+- `gone`: the order vanished (cancelled, expired or fully filled, which cannot
+  be told apart; it is never counted as a sale on its own)
+
+Each watch shows its last status: `ok`, `truncated` (the page cap was reached,
+so nothing is marked `gone`), `forbidden` (no docking access), `needs_reauth`
+(sign that character in again), `rate_limited` or `error`. After a rate limit
+the collector waits the `Retry-After` before the next run. Unwatching stops the
+collection and keeps what was stored.
+
 ## Development
 
 ```bash

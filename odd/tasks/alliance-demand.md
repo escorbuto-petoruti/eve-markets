@@ -20,7 +20,7 @@ ESI exposes only current orders of a structure, no history. Demand must be infer
 - Inference rules: `fill` = volume_remain decreased; `gone` = order vanished (cancelled, expired or fully filled: ambiguous, kept separate, never counted as sales on its own); `new`; `price` change.
 
 ## Tasks
-- [ ] T1 Watchlist + collector: tables `watched_structures`, `orders_current`, `order_events` (migration 3), diffing collector, loop in `serve`, per-structure status (last run, error, needs re-login), API to watch/unwatch/list, minimal UI. Test-first.
+- [x] T1 Watchlist + collector: tables `watched_structures`, `orders_current`, `order_events` (migration 3), diffing collector, loop in `serve`, per-structure status (last run, error, needs re-login), API to watch/unwatch/list, minimal UI. Test-first.
 - [ ] T2 Demand view: per type over a window (default 7d): units filled, value, open buy volume/value, last price; API + table UI.
 - [ ] T3 Jita comparison: on-demand Jita orders per type (region orders filtered by type_id and location_id, TTL cache, bounded to the top N types of the demand view), best sell/buy vs the alliance, absolute and % differential; API + UI columns.
 
@@ -31,7 +31,10 @@ ESI exposes only current orders of a structure, no history. Demand must be infer
 gofmt/vet/test green; CGO_ENABLED=0 build; migrations applied on an existing DB without data loss; live check by owner after each task.
 
 ## Progress / evidence
-(none yet)
+- T1 (writer, delegated): RED observed (store/collector/scheduler/web tests failed to compile: undefined AddWatch, store.StoredOrder, Diff, Loop). GREEN: gofmt clean; go vet ./...; go test -count=1 ./...; go test -race -count=2 ./internal/collector ./internal/scheduler ./internal/web; CGO_ENABLED=0 go build; node --check app.js, all pass.
+  - Design notes: migration 3 appended; `Diff` takes `[]esi.Order` (the ESI type); first collection (no stored rows) stores a baseline without events; truncated fetch drops `gone` events/deletes and records status `truncated`; `last_seen` only changes when an order row changes (unchanged orders are not rewritten); `fill` and `price` can both fire for one order; a structure watched by two characters is fetched once per watch (no dedupe yet); the usage-text test now forbids "eve-markets collect" instead of the word "collect".
+  - Not verified live: real ESI collection, browser UI (Watch/Unwatch buttons), a 429 backoff against ESI, migration on a real user database.
+  - Commit: pending (parent commits).
 
 ## Next step
-Launch the T1 writer.
+Review/commit T1, then launch the T2 writer.
