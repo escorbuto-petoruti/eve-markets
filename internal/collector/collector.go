@@ -132,61 +132,90 @@ func Diff(prev []store.StoredOrder, now []esi.Order, at time.Time) (upserts []st
 // so the caller can back off) and a cancelled context. A failure to store is
 // returned.
 func Collect(ctx context.Context, d Deps, w store.WatchedStructure) error {
+	return collectStructure(ctx, d, []store.WatchedStructure{w})
+}
+
+// collectStructure fetches one structure once for all the characters that
+// watch it (ws, all with the same StructureID, lowest character first). It
+// tries each watcher's token in turn, moving on only when that watcher needs to
+// re-authenticate or is forbidden. The first fetch that succeeds is applied
+// once, and its status is recorded for every watcher it served, including the
+// ones never tried. Any other failure stops the attempts and is recorded for
+// the watcher that failed and the ones never tried.
+func collectStructure(ctx context.Context, d Deps, ws []store.WatchedStructure) error {
 	at := d.now()
-	record := func(status, msg string) error {
-		if err := d.Store.RecordRun(ctx, w.CharacterID, w.StructureID, at, status, msg); err != nil {
-			slog.Error("record collection run", "character_id", w.CharacterID, "structure_id", w.StructureID, "err", err)
-			return err
+	structureID := ws[0].StructureID
+	// recordRange records one status for the watchers ws[from:to].
+	recordRange := func(from, to int, status, msg string) error {
+		var errs []error
+		for _, w := range ws[from:to] {
+			if err := d.Store.RecordRun(ctx, w.CharacterID, w.StructureID, at, status, msg); err != nil {
+				slog.Error("record collection run", "character_id", w.CharacterID, "structure_id", w.StructureID, "err", err)
+				errs = append(errs, err)
+			}
 		}
-		return nil
+		return errors.Join(errs...)
 	}
-	fail := func(err error) error {
+	// fail records the failure of watcher i. It reports whether the next
+	// watcher should be tried, and the error to return. A failure that is not
+	// tried again is recorded for every watcher not yet served.
+	fail := func(i int, err error) (next bool, ret error) {
 		var rl *esi.RateLimitError
 		var reauth *auth.ReauthError
 		switch {
 		case ctx.Err() != nil:
-			return ctx.Err()
+			return false, ctx.Err()
 		case errors.As(err, &rl):
-			slog.Warn("collect structure orders: rate limited", "structure_id", w.StructureID, "retry_after", rl.RetryAfter)
-			if rerr := record(StatusRateLimited, msgRateLimited); rerr != nil {
-				return errors.Join(err, rerr)
+			slog.Warn("collect structure orders: rate limited", "structure_id", structureID, "retry_after", rl.RetryAfter)
+			if rerr := recordRange(i, len(ws), StatusRateLimited, msgRateLimited); rerr != nil {
+				return false, errors.Join(err, rerr)
 			}
-			return err
+			return false, err
 		case errors.As(err, &reauth):
-			return record(StatusNeedsReauth, msgNeedsReauth)
+			return true, recordRange(i, i+1, StatusNeedsReauth, msgNeedsReauth)
 		case esi.IsForbidden(err):
-			return record(StatusForbidden, msgForbidden)
+			return true, recordRange(i, i+1, StatusForbidden, msgForbidden)
 		}
-		slog.Error("collect structure orders", "character_id", w.CharacterID, "structure_id", w.StructureID, "err", err)
-		return record(StatusError, msgError)
+		slog.Error("collect structure orders", "character_id", ws[i].CharacterID, "structure_id", structureID, "err", err)
+		return false, recordRange(i, len(ws), StatusError, msgError)
 	}
 
-	token, err := d.Tokens.Token(ctx, w.CharacterID)
-	if err != nil {
-		return fail(err)
+	for i, w := range ws {
+		token, err := d.Tokens.Token(ctx, w.CharacterID)
+		var live []esi.Order
+		var truncated bool
+		if err == nil {
+			live, truncated, err = d.ESI.StructureOrders(ctx, token, structureID)
+		}
+		if err != nil {
+			next, ret := fail(i, err)
+			if next && ret == nil {
+				continue
+			}
+			return ret
+		}
+		prev, err := d.Store.CurrentOrders(ctx, structureID)
+		if err != nil {
+			slog.Error("read current orders", "structure_id", structureID, "err", err)
+			_, ret := fail(i, err)
+			return ret
+		}
+		upserts, deletes, events := Diff(prev, live, at)
+		status, msg := StatusOK, ""
+		if truncated {
+			// Partial data: an absent order may simply be on a page we never read.
+			deletes = nil
+			events = dropGone(events)
+			status, msg = StatusTruncated, msgTruncated
+		}
+		if err := d.Store.ApplyOrderDiff(ctx, structureID, at, upserts, deletes, events); err != nil {
+			slog.Error("apply order diff", "structure_id", structureID, "err", err)
+			_, ret := fail(i, err)
+			return ret
+		}
+		return recordRange(i, len(ws), status, msg)
 	}
-	live, truncated, err := d.ESI.StructureOrders(ctx, token, w.StructureID)
-	if err != nil {
-		return fail(err)
-	}
-	prev, err := d.Store.CurrentOrders(ctx, w.StructureID)
-	if err != nil {
-		slog.Error("read current orders", "structure_id", w.StructureID, "err", err)
-		return fail(err)
-	}
-	upserts, deletes, events := Diff(prev, live, at)
-	status, msg := StatusOK, ""
-	if truncated {
-		// Partial data: an absent order may simply be on a page we never read.
-		deletes = nil
-		events = dropGone(events)
-		status, msg = StatusTruncated, msgTruncated
-	}
-	if err := d.Store.ApplyOrderDiff(ctx, w.StructureID, at, upserts, deletes, events); err != nil {
-		slog.Error("apply order diff", "structure_id", w.StructureID, "err", err)
-		return fail(err)
-	}
-	return record(status, msg)
+	return nil
 }
 
 func dropGone(events []store.OrderEvent) []store.OrderEvent {
@@ -199,7 +228,8 @@ func dropGone(events []store.OrderEvent) []store.OrderEvent {
 	return out
 }
 
-// Run collects every watched structure, one at a time. It stops at the first
+// Run collects every watched structure once, one at a time, even when several
+// characters watch it (see collectStructure). It stops at the first
 // rate limit (returning that error so the scheduler can wait Retry-After), on
 // context cancellation, and when the watchlist cannot be read.
 func Run(ctx context.Context, d Deps) error {
@@ -208,11 +238,18 @@ func Run(ctx context.Context, d Deps) error {
 		return err
 	}
 	var firstErr error
-	for _, w := range watched {
+	for i := 0; i < len(watched); {
+		// ListWatched orders by structure, so watchers of one structure are adjacent.
+		j := i + 1
+		for j < len(watched) && watched[j].StructureID == watched[i].StructureID {
+			j++
+		}
+		group := watched[i:j]
+		i = j
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		err := Collect(ctx, d, w)
+		err := collectStructure(ctx, d, group)
 		var rl *esi.RateLimitError
 		if errors.As(err, &rl) || ctx.Err() != nil {
 			return err

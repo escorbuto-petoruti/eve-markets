@@ -143,6 +143,7 @@ type fakeESI struct {
 	orders    map[int64][]esi.Order
 	truncated bool
 	err       error
+	errByTok  map[string]error // optional per-token failure, checked before err
 	calls     []int64
 	tokens    []string
 }
@@ -150,6 +151,9 @@ type fakeESI struct {
 func (f *fakeESI) StructureOrders(_ context.Context, token string, id int64) ([]esi.Order, bool, error) {
 	f.calls = append(f.calls, id)
 	f.tokens = append(f.tokens, token)
+	if err, ok := f.errByTok[token]; ok {
+		return nil, false, err
+	}
 	return f.orders[id], f.truncated, f.err
 }
 
@@ -302,5 +306,154 @@ func TestRunIteratesSeriallyAndStopsOnRateLimit(t *testing.T) {
 	}
 	if len(fe2.calls) != 1 {
 		t.Errorf("calls after rate limit = %v, want 1", fe2.calls)
+	}
+}
+
+// Shared structures: one fetch per structure, many watchers.
+
+type tokenByChar struct{}
+
+func (tokenByChar) Characters(context.Context) ([]auth.Character, error) { return nil, nil }
+func (tokenByChar) Token(_ context.Context, id int64) (string, error) {
+	return fmt.Sprintf("token-%d", id), nil
+}
+
+func sharedDeps(fs *fakeStore, fe *fakeESI) Deps {
+	return Deps{Store: fs, ESI: fe, Tokens: tokenByChar{}, Now: func() time.Time { return t0 }}
+}
+
+func twoWatchers() []store.WatchedStructure {
+	return []store.WatchedStructure{{CharacterID: 1, StructureID: 500}, {CharacterID: 2, StructureID: 500}}
+}
+
+func runStatuses(runs []runCall) []string {
+	var out []string
+	for _, r := range runs {
+		out = append(out, fmt.Sprintf("%d/%d:%s", r.char, r.structure, r.status))
+	}
+	return out
+}
+
+func TestRunFetchesSharedStructureOnce(t *testing.T) {
+	fs := &fakeStore{watched: twoWatchers()}
+	fe := &fakeESI{orders: map[int64][]esi.Order{500: {live(1, true, 5, 4)}}}
+	if err := Run(context.Background(), sharedDeps(fs, fe)); err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.calls) != 1 || fe.tokens[0] != "token-1" {
+		t.Errorf("fetches = %v tokens = %v, want one fetch with token-1", fe.calls, fe.tokens)
+	}
+	if len(fs.applied) != 1 {
+		t.Errorf("applied = %d, want 1", len(fs.applied))
+	}
+	if got := runStatuses(fs.runs); !slices.Equal(got, []string{"1/500:ok", "2/500:ok"}) {
+		t.Errorf("runs = %v", got)
+	}
+}
+
+func TestRunSharedStructureFallsThroughOnReauthAndForbidden(t *testing.T) {
+	tests := []struct {
+		name string
+		deps func(fs *fakeStore, fe *fakeESI) Deps
+		fe   *fakeESI
+		want []string
+	}{
+		{"reauth", func(fs *fakeStore, fe *fakeESI) Deps {
+			d := sharedDeps(fs, fe)
+			d.Tokens = fakeTokensByChar{reauth: 1}
+			return d
+		}, &fakeESI{orders: map[int64][]esi.Order{500: {live(1, true, 5, 4)}}}, []string{"1/500:needs_reauth", "2/500:ok"}},
+		{"forbidden", sharedDeps, &fakeESI{
+			orders:   map[int64][]esi.Order{500: {live(1, true, 5, 4)}},
+			errByTok: map[string]error{"token-1": &esi.APIError{Status: 403}},
+		}, []string{"1/500:forbidden", "2/500:ok"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := &fakeStore{watched: twoWatchers()}
+			if err := Run(context.Background(), tt.deps(fs, tt.fe)); err != nil {
+				t.Fatal(err)
+			}
+			if got := runStatuses(fs.runs); !slices.Equal(got, tt.want) {
+				t.Errorf("runs = %v, want %v", got, tt.want)
+			}
+			if n := len(tt.fe.tokens); n == 0 || tt.fe.tokens[n-1] != "token-2" {
+				t.Errorf("tokens = %v, want the second watcher's token last", tt.fe.tokens)
+			}
+			if len(fs.applied) != 1 {
+				t.Errorf("applied = %d, want 1", len(fs.applied))
+			}
+		})
+	}
+}
+
+// fakeTokensByChar fails with a reauth error for one character only.
+type fakeTokensByChar struct{ reauth int64 }
+
+func (fakeTokensByChar) Characters(context.Context) ([]auth.Character, error) { return nil, nil }
+func (f fakeTokensByChar) Token(_ context.Context, id int64) (string, error) {
+	if id == f.reauth {
+		return "", &auth.ReauthError{CharacterID: id, Name: "x"}
+	}
+	return fmt.Sprintf("token-%d", id), nil
+}
+
+func TestRunSharedStructureAllWatchersFail(t *testing.T) {
+	fs := &fakeStore{watched: twoWatchers()}
+	fe := &fakeESI{errByTok: map[string]error{"token-1": &esi.APIError{Status: 403}, "token-2": &esi.APIError{Status: 403}}}
+	if err := Run(context.Background(), sharedDeps(fs, fe)); err != nil {
+		t.Fatal(err)
+	}
+	if got := runStatuses(fs.runs); !slices.Equal(got, []string{"1/500:forbidden", "2/500:forbidden"}) {
+		t.Errorf("runs = %v", got)
+	}
+	if len(fs.applied) != 0 {
+		t.Errorf("applied on failure: %+v", fs.applied)
+	}
+}
+
+func TestRunSharedStructureRateLimitDoesNotFallThrough(t *testing.T) {
+	fs := &fakeStore{watched: twoWatchers()}
+	fe := &fakeESI{err: &esi.RateLimitError{Status: 429, RetryAfter: time.Minute}}
+	err := Run(context.Background(), sharedDeps(fs, fe))
+	var rl *esi.RateLimitError
+	if !errors.As(err, &rl) {
+		t.Fatalf("err = %v, want rate limit", err)
+	}
+	if len(fe.calls) != 1 {
+		t.Errorf("fetches = %d, want 1", len(fe.calls))
+	}
+	if got := runStatuses(fs.runs); !slices.Equal(got, []string{"1/500:rate_limited", "2/500:rate_limited"}) {
+		t.Errorf("runs = %v", got)
+	}
+}
+
+func TestRunSharedStructureGenericErrorDoesNotFallThrough(t *testing.T) {
+	fs := &fakeStore{watched: twoWatchers()}
+	fe := &fakeESI{err: errors.New("boom")}
+	if err := Run(context.Background(), sharedDeps(fs, fe)); err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.calls) != 1 {
+		t.Errorf("fetches = %d, want 1", len(fe.calls))
+	}
+	if got := runStatuses(fs.runs); !slices.Equal(got, []string{"1/500:error", "2/500:error"}) {
+		t.Errorf("runs = %v", got)
+	}
+}
+
+func TestRunGroupsOnlyAdjacentSameStructure(t *testing.T) {
+	fs := &fakeStore{watched: []store.WatchedStructure{
+		{CharacterID: 1, StructureID: 500}, {CharacterID: 2, StructureID: 500}, {CharacterID: 1, StructureID: 600},
+	}}
+	fe := &fakeESI{orders: map[int64][]esi.Order{}}
+	if err := Run(context.Background(), sharedDeps(fs, fe)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(fe.calls, []int64{500, 600}) {
+		t.Errorf("fetches = %v", fe.calls)
+	}
+	if len(fs.runs) != 3 {
+		t.Errorf("runs = %v", runStatuses(fs.runs))
 	}
 }
