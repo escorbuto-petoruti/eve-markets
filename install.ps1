@@ -93,6 +93,19 @@ function Test-EveInteractive {
     }
 }
 
+# True when $dir is one of the ';'-separated entries of a user PATH value (case-insensitive,
+# trailing slashes ignored), compared both as written and with %VAR% references expanded.
+function Test-EveDirInPath([string]$dir, [string]$pathValue) {
+    $want = $dir.TrimEnd('\', '/')
+    foreach ($p in ($pathValue -split ';')) {
+        $entry = $p.Trim()
+        if ($entry.TrimEnd('\', '/') -ieq $want) { return $true }
+        $expanded = [Environment]::ExpandEnvironmentVariables($entry)
+        if ($expanded.TrimEnd('\', '/') -ieq $want) { return $true }
+    }
+    return $false
+}
+
 function Install-EveMarkets {
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue'
