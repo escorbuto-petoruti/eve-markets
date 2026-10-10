@@ -343,7 +343,7 @@ func TestDemandJitaCacheIsPerServer(t *testing.T) {
 
 func TestDemandJitaValidation(t *testing.T) {
 	f := jitaFixture(t, jitaMarkets())
-	for _, q := range []string{"jita=2", "jita=x", "jita=", "jita=1&jita_limit=0", "jita=1&jita_limit=51", "jita=1&jita_limit=x"} {
+	for _, q := range []string{"jita=2", "jita=x", "jita=", "jita=1&jita_limit=0", "jita=1&jita_limit=51", "jita=1&jita_limit=x", "jita=-1", "jita=1&jita_limit=-1"} {
 		if rec := do(f.h, http.MethodGet, "/api/demand?structure_id=500&"+q); rec.Code != http.StatusBadRequest {
 			t.Errorf("%q status = %d, want 400", q, rec.Code)
 		}

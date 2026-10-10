@@ -109,6 +109,9 @@ type fakeStore struct {
 	applied []applyCall
 	runs    []runCall
 	applyEr error
+	listErr error
+	curErr  error
+	runErr  error // returned by RecordRun after the call is recorded
 }
 
 type applyCall struct {
@@ -125,10 +128,10 @@ type runCall struct {
 }
 
 func (f *fakeStore) ListWatched(context.Context) ([]store.WatchedStructure, error) {
-	return f.watched, nil
+	return f.watched, f.listErr
 }
 func (f *fakeStore) CurrentOrders(_ context.Context, id int64) ([]store.StoredOrder, error) {
-	return f.current[id], nil
+	return f.current[id], f.curErr
 }
 func (f *fakeStore) ApplyOrderDiff(_ context.Context, id int64, _ time.Time, up []store.StoredOrder, del []int64, ev []store.OrderEvent) error {
 	f.applied = append(f.applied, applyCall{id, up, del, ev})
@@ -136,7 +139,7 @@ func (f *fakeStore) ApplyOrderDiff(_ context.Context, id int64, _ time.Time, up 
 }
 func (f *fakeStore) RecordRun(_ context.Context, c, s int64, at time.Time, status, msg string) error {
 	f.runs = append(f.runs, runCall{c, s, status, msg, at})
-	return nil
+	return f.runErr
 }
 
 type fakeESI struct {
@@ -455,5 +458,115 @@ func TestRunGroupsOnlyAdjacentSameStructure(t *testing.T) {
 	}
 	if len(fs.runs) != 3 {
 		t.Errorf("runs = %v", runStatuses(fs.runs))
+	}
+}
+
+// A store failure after a good fetch is recorded as an error status with the
+// fixed message; Collect itself returns nil because the failure was recorded.
+func TestCollectStoreReadWriteFailuresAreRecorded(t *testing.T) {
+	tests := []struct {
+		name  string
+		store *fakeStore
+		want  int // ApplyOrderDiff calls
+	}{
+		{"current orders", &fakeStore{curErr: errors.New("db read secret")}, 0},
+		{"apply diff", &fakeStore{applyEr: errors.New("db write secret")}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fe := &fakeESI{orders: map[int64][]esi.Order{500: {live(1, true, 5, 4)}}}
+			if err := Collect(context.Background(), newDeps(tt.store, fe, fakeTokens{}), w1); err != nil {
+				t.Fatalf("err = %v, want nil (failure recorded as a status)", err)
+			}
+			if len(tt.store.applied) != tt.want {
+				t.Errorf("apply calls = %d, want %d", len(tt.store.applied), tt.want)
+			}
+			if len(tt.store.runs) != 1 || tt.store.runs[0].status != StatusError || tt.store.runs[0].errMsg != msgError {
+				t.Errorf("runs = %+v, want one error status with the fixed message", tt.store.runs)
+			}
+		})
+	}
+}
+
+func TestCollectReturnsRecordRunFailure(t *testing.T) {
+	recErr := errors.New("record failed")
+	fs := &fakeStore{runErr: recErr}
+	fe := &fakeESI{orders: map[int64][]esi.Order{500: {live(1, true, 5, 4)}}}
+	err := Collect(context.Background(), newDeps(fs, fe, fakeTokens{}), w1)
+	if !errors.Is(err, recErr) {
+		t.Fatalf("err = %v, want the record error", err)
+	}
+	if len(fs.applied) != 1 {
+		t.Errorf("applied = %d, want 1 (the diff is stored before recording)", len(fs.applied))
+	}
+}
+
+func TestCollectRecordFailureAfterStoreFailureIsReturned(t *testing.T) {
+	recErr := errors.New("record failed")
+	fs := &fakeStore{curErr: errors.New("db read"), runErr: recErr}
+	fe := &fakeESI{orders: map[int64][]esi.Order{500: {live(1, true, 5, 4)}}}
+	if err := Collect(context.Background(), newDeps(fs, fe, fakeTokens{}), w1); !errors.Is(err, recErr) {
+		t.Fatalf("err = %v, want the record error", err)
+	}
+}
+
+// When the rate limit cannot be recorded, the caller still gets the rate limit
+// error (to back off) joined with the record error.
+func TestCollectRateLimitJoinsRecordFailure(t *testing.T) {
+	recErr := errors.New("record failed")
+	fs := &fakeStore{runErr: recErr}
+	fe := &fakeESI{err: &esi.RateLimitError{Status: 429, RetryAfter: time.Minute}}
+	err := Collect(context.Background(), newDeps(fs, fe, fakeTokens{}), w1)
+	var rl *esi.RateLimitError
+	if !errors.As(err, &rl) || rl.RetryAfter != time.Minute {
+		t.Errorf("err = %v, want the rate limit error", err)
+	}
+	if !errors.Is(err, recErr) {
+		t.Errorf("err = %v, want the record error joined", err)
+	}
+}
+
+// A failed record for one watcher does not stop the others from being recorded;
+// every record error is returned.
+func TestCollectRecordsEveryWatcherDespiteRecordFailure(t *testing.T) {
+	recErr := errors.New("record failed")
+	fs := &fakeStore{runErr: recErr}
+	fe := &fakeESI{orders: map[int64][]esi.Order{500: {live(1, true, 5, 4)}}}
+	ws := []store.WatchedStructure{{CharacterID: 1, StructureID: 500}, {CharacterID: 2, StructureID: 500}}
+	err := collectStructure(context.Background(), newDeps(fs, fe, fakeTokens{}), ws)
+	if !errors.Is(err, recErr) {
+		t.Fatalf("err = %v, want the record error", err)
+	}
+	if len(fs.runs) != 2 {
+		t.Errorf("runs = %+v, want both watchers recorded", fs.runs)
+	}
+}
+
+func TestRunReturnsListWatchedError(t *testing.T) {
+	listErr := errors.New("list failed")
+	fs := &fakeStore{listErr: listErr}
+	fe := &fakeESI{}
+	if err := Run(context.Background(), newDeps(fs, fe, fakeTokens{})); !errors.Is(err, listErr) {
+		t.Fatalf("err = %v, want the list error", err)
+	}
+	if len(fe.calls) != 0 {
+		t.Errorf("fetched %v after a failed list", fe.calls)
+	}
+}
+
+// Run keeps collecting the other structures after a store failure and returns
+// the first error.
+func TestRunContinuesAfterStoreFailureAndReturnsFirstError(t *testing.T) {
+	recErr := errors.New("record failed")
+	fs := &fakeStore{runErr: recErr, watched: []store.WatchedStructure{
+		{CharacterID: 1, StructureID: 500}, {CharacterID: 1, StructureID: 600},
+	}}
+	fe := &fakeESI{orders: map[int64][]esi.Order{500: {live(1, true, 5, 4)}, 600: {live(2, true, 5, 4)}}}
+	err := Run(context.Background(), newDeps(fs, fe, fakeTokens{}))
+	if !errors.Is(err, recErr) {
+		t.Fatalf("err = %v, want the record error", err)
+	}
+	if !slices.Equal(fe.calls, []int64{500, 600}) {
+		t.Errorf("fetched %v, want both structures", fe.calls)
 	}
 }

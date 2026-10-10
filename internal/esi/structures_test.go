@@ -174,3 +174,27 @@ func TestProbeStructureMarketRejectsBadID(t *testing.T) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
+
+func TestSanitizeDetail(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"empty", "", ""},
+		{"plain", "Market access denied", "Market access denied"},
+		{"trims surrounding space", "  denied \t\n", "denied"},
+		{"drops control characters", "a\x07b\x00c\td\ne", "abcde"},
+		{"drops non-printable unicode", "a\u200bb\u00adc", "abc"},
+		{"only non-printable", "\x01\x02\r\n", ""},
+		{"keeps printable unicode", "Fortizar \u00e9\u4e2d", "Fortizar \u00e9\u4e2d"},
+		{"cuts at the limit in characters", strings.Repeat("\u00e9", maxProbeDetail+50), strings.Repeat("\u00e9", maxProbeDetail)},
+		{"counts only kept characters", strings.Repeat("\x07", 300) + strings.Repeat("x", 250), strings.Repeat("x", maxProbeDetail)},
+		{"trims after cutting", strings.Repeat("x", maxProbeDetail-1) + "   y", strings.Repeat("x", maxProbeDetail-1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sanitizeDetail(tc.in); got != tc.want {
+				t.Errorf("sanitizeDetail(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
