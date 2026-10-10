@@ -76,6 +76,29 @@
     <p class="muted">While the app runs, the orders of watched structures are collected periodically (see <code>--collect-interval</code>) and changes between collections are stored. Use Watch on a search result that has a market.</p>
     <p id="watched-status" class="warn" role="status" aria-live="polite"></p>
     <ul id="watched-list" aria-labelledby="watched-title"></ul>
+    <h3 id="demand-title">Demand</h3>
+    <form id="demand-form" class="market-form">
+      <label>Structure <select id="demand-structure"></select></label>
+      <label>Window
+        <select id="demand-days">
+          <option value="1">1 day</option>
+          <option value="7" selected>7 days</option>
+          <option value="30">30 days</option>
+        </select>
+      </label>
+      <label>Sort by
+        <select id="demand-sort">
+          <option value="sold_value">Sold value</option>
+          <option value="sold_units">Sold units</option>
+          <option value="open_buy_value">Open buy value</option>
+          <option value="bought_value">Bought value</option>
+        </select>
+      </label>
+      <button type="submit" id="demand-load">Load</button>
+    </form>
+    <p id="demand-coverage" class="muted" role="status" aria-live="polite"></p>
+    <p id="demand-status" class="warn" role="status" aria-live="polite"></p>
+    <div class="table-wrap"><table id="demand-table"></table></div>
   </section>
 </main>
 <script src="/static/app.js"></script>

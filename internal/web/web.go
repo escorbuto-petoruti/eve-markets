@@ -85,6 +85,7 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/watch", requireUser(s.watchStructure))
 	mux.HandleFunc("POST /api/unwatch", requireUser(s.unwatchStructure))
 	mux.HandleFunc("GET /api/watched", requireUser(s.watchedList))
+	mux.HandleFunc("GET /api/demand", requireUser(s.demandSummary))
 	return s.guard(s.withSession(mux))
 }
 

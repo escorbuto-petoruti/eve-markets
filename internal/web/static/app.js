@@ -189,6 +189,7 @@
   };
 
   function renderWatched(items) {
+    renderDemandChoices(items);
     var list = $("watched-list");
     list.replaceChildren();
     watchedStatus(items.length ? "" : "No watched structures yet.");
@@ -264,6 +265,73 @@
         " Search lists structures you can dock at; a refusal most likely means this structure has no market service." : ""));
     });
   }
+
+  var nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  var isk = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function fmtInt(n) { return nf.format(n); }
+  function fmtIsk(n) { return isk.format(n); }
+  function fmtPrice(n) { return n > 0 ? fmtIsk(n) : "-"; }
+  function fmtTime(sec) { return sec ? new Date(sec * 1000).toLocaleString() : "-"; }
+
+  var demandCols = [
+    ["Type", function (r) { return r.name ? r.name + " (" + r.type_id + ")" : r.type_id; }],
+    ["Sold units", function (r) { return fmtInt(r.sold_units); }],
+    ["Sold value", function (r) { return fmtIsk(r.sold_value); }],
+    ["Open buy volume", function (r) { return fmtInt(r.open_buy_volume); }],
+    ["Open buy value", function (r) { return fmtIsk(r.open_buy_value); }],
+    ["Best sell", function (r) { return fmtPrice(r.best_sell); }],
+    ["Best buy", function (r) { return fmtPrice(r.best_buy); }],
+    ["Last fill", function (r) { return fmtTime(r.last_fill_at); }]
+  ];
+
+  // renderDemandChoices keeps the demand selector in step with the watchlist
+  // (one entry per structure, even when two characters watch it).
+  function renderDemandChoices(items) {
+    var sel = $("demand-structure");
+    var keep = sel.value;
+    sel.replaceChildren();
+    var seen = {};
+    items.forEach(function (x) {
+      if (seen[x.structure_id]) { return; }
+      seen[x.structure_id] = true;
+      var opt = document.createElement("option");
+      opt.value = x.structure_id;
+      opt.textContent = (x.name || "(name hidden)") + " [" + x.structure_id + "]";
+      sel.appendChild(opt);
+    });
+    if (keep && seen[keep]) { sel.value = keep; }
+    $("demand-load").disabled = !sel.options.length;
+  }
+
+  function demandCoverage(meta) {
+    var text = "Collecting since " + fmtTime(meta.first_collected_at) + ", last run " + fmtTime(meta.last_run_at) +
+      ". Sales are inferred from order volume changes between runs, so short-lived orders can be missed.";
+    $("demand-coverage").textContent = text;
+  }
+
+  function loadDemand() {
+    var id = $("demand-structure").value;
+    if (!id) { $("demand-status").textContent = "Watch a structure first."; return; }
+    var url = "/api/demand?structure_id=" + encodeURIComponent(id) + "&days=" +
+      encodeURIComponent($("demand-days").value) + "&sort=" + encodeURIComponent($("demand-sort").value);
+    $("demand-status").textContent = "Loading...";
+    $("demand-coverage").textContent = "";
+    $("demand-table").replaceChildren();
+    getJSON(url).then(function (body) {
+      if (!body) { return; }
+      demandCoverage(body.meta);
+      var rows = body.rows || [];
+      if (!body.meta.total_fill_events) {
+        $("demand-status").textContent = "No fill events in this window yet: collection just started, fills appear from the second run." +
+          (rows.length ? " Showing open orders only." : "");
+      } else {
+        $("demand-status").textContent = fmtInt(body.meta.total_fill_events) + " fill events in this window.";
+      }
+      if (rows.length) { renderTable(demandCols, rows, $("demand-table")); }
+    }).catch(function (err) { $("demand-status").textContent = "Error: " + err.message; });
+  }
+
+  $("demand-form").addEventListener("submit", function (e) { e.preventDefault(); loadDemand(); });
 
   // Inline handlers are blocked by the CSP; Enter runs the matching action.
   $("structure-form").addEventListener("submit", function (e) { e.preventDefault(); loadStructureSearch(false); });

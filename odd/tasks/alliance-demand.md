@@ -21,7 +21,7 @@ ESI exposes only current orders of a structure, no history. Demand must be infer
 
 ## Tasks
 - [x] T1 Watchlist + collector: tables `watched_structures`, `orders_current`, `order_events` (migration 3), diffing collector, loop in `serve`, per-structure status (last run, error, needs re-login), API to watch/unwatch/list, minimal UI. Test-first.
-- [ ] T2 Demand view: per type over a window (default 7d): units filled, value, open buy volume/value, last price; API + table UI.
+- [x] T2 Demand view: per type over a window (default 7d): units filled, value, open buy volume/value, last price; API + table UI.
 - [ ] T3 Jita comparison: on-demand Jita orders per type (region orders filtered by type_id and location_id, TTL cache, bounded to the top N types of the demand view), best sell/buy vs the alliance, absolute and % differential; API + UI columns.
 
 ## Route declaration
@@ -37,6 +37,11 @@ gofmt/vet/test green; CGO_ENABLED=0 build; migrations applied on an existing DB 
   - Commit: pending (parent commits).
 
 - T1b: no_market wording + probe status/detail recorded (migration 4). Owner clarified that search lists structures the character can dock at, so `no` became `no_market` (ESI refused the market read, most likely no market service). Probe now returns `esi.Probe{Result,Status,Detail}`; `structure_access` gained nullable `http_status`/`detail`; search results carry `market_status`/`market_detail` (tooltip on the badge). RED observed (esi, store, web tests failed to compile on the missing Probe/StructureAccess types). Not verified live: real ESI 403/404 error bodies (what `error` text ESI sends), the browser tooltip, migration 4 on a real user database.
+
+- T2 (writer, delegated): RED observed (store tests failed to compile on the missing DemandSummary/DemandRow/DemandSort*; web tests all returned 404 for /api/demand). GREEN: gofmt clean; go vet ./...; go test -count=1 ./...; go test -race -count=2 ./internal/web ./internal/store; CGO_ENABLED=0 go build; node --check app.js, all pass.
+  - Design notes: `DemandSummary` (sold value order) wraps `DemandSummarySorted` with a whitelisted sort key (needed so the cap applies after the requested sort); window is inclusive on both ends (since <= at <= until); only `fill` events count; `FirstCollectedAt` = min(orders_current.first_seen, order_events.at), a lower bound of the baseline (the watch's created_at predates the first collection and is not used); `LastRunAt` = latest last_run_at over watches of the structure; no new index (existing (structure_id, type_id, at) and (structure_id, type_id) cover the GROUP BYs). `/api/demand` answers 404 "structure not found" for unwatched and foreign structures alike; type names are optional.
+  - Not verified live: real collected data in the UI, browser rendering of the Demand panel (layout, number formatting), query time on a large (tens of thousands of orders, 90 days of events) database.
+  - Commit: pending (parent commits).
 
 ## Next step
 Review/commit T1, then launch the T2 writer.

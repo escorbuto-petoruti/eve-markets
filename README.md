@@ -110,6 +110,29 @@ so nothing is marked `gone`), `forbidden` (ESI refused the market read), `needs_
 the collector waits the `Retry-After` before the next run. Unwatching stops the
 collection and keeps what was stored.
 
+## Demand
+
+Under **Watched structures** the **Demand** panel summarizes what members
+buy and sell in a watched structure over the last 1, 7 or 30 days
+(`GET /api/demand?structure_id=&days=&limit=&sort=`, days 1-90, limit up to 500,
+sort by `sold_value`, `sold_units`, `open_buy_value` or `bought_value`). The
+structure must be on the watchlist of one of your characters.
+
+- **Sold units / value**: units that left sell orders (`fill` events on sell
+  orders, i.e. bought by members), valued at the order price of the event.
+- **Bought units / value**: units that were sold into buy orders.
+- **Open buy volume / value**: what the open buy orders ask for right now, so
+  an item with demand but no fills yet still shows up. **Best sell** is the
+  lowest sell price and **Best buy** the highest buy price (`-` when none).
+
+These are inferences, not trades. The collector only compares snapshots every
+`--collect-interval`, so several fills of one order between two runs add up to
+one event at the later price, and an order that appears and vanishes between
+two runs is never seen. `gone` orders are never counted as sales (they may
+have been cancelled or expired). Data starts at the first collection of the
+structure (the baseline emits no events), shown in the panel as "Collecting
+since"; fills appear from the second run.
+
 ## Development
 
 ```bash
