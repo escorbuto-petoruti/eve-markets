@@ -154,7 +154,7 @@ func (s *Store) DemandSummarySorted(ctx context.Context, structureID int64, sinc
 	}
 	meta := DemandMeta{Since: since, Until: until}
 	var first, lastRun *int64
-	err = s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM order_events WHERE structure_id = ?1 AND kind = 'fill' AND at >= ?2 AND at <= ?3),
 			(SELECT MIN(v) FROM (
