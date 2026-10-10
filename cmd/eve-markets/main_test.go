@@ -275,26 +275,21 @@ func TestServeRefusesNonLoopback(t *testing.T) {
 	}
 }
 
-func TestServeFailsWithoutClientID(t *testing.T) {
+func TestServeStartsWithoutClientIDEnv(t *testing.T) {
 	for _, env := range []map[string]string{
 		{"HOME": "/home/u"},
 		{"HOME": "/home/u", "EVE_MARKETS_CLIENT_ID": "   "},
 	} {
 		h := newHarness(t, env)
-		if got := run(context.Background(), []string{"serve", "--addr", "127.0.0.1:0"}, h.deps); got != 1 {
-			t.Errorf("exit = %d, want 1", got)
-		}
-		msg := h.err.String()
-		if !strings.Contains(msg, "EVE_MARKETS_CLIENT_ID") || !strings.Contains(msg, "register your own EVE application") {
-			t.Errorf("stderr = %q, want a clear message naming EVE_MARKETS_CLIENT_ID", msg)
-		}
+		_, cancel, done := startServe(t, h)
+		cancel()
 		select {
-		case <-h.listeners:
-			t.Error("must not listen without a client id")
-		default:
-		}
-		if h.dbPath != "" {
-			t.Error("store must not be opened without a client id")
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("exit = %d, want 0 with the embedded client id; stderr = %q", code, h.err.String())
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("serve did not stop")
 		}
 	}
 }

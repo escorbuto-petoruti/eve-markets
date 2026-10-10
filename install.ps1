@@ -93,6 +93,19 @@ function Test-EveInteractive {
     }
 }
 
+# True when $dir is one of the ';'-separated entries of a user PATH value (case-insensitive,
+# trailing slashes ignored), compared both as written and with %VAR% references expanded.
+function Test-EveDirInPath([string]$dir, [string]$pathValue) {
+    $want = $dir.TrimEnd('\', '/')
+    foreach ($p in ($pathValue -split ';')) {
+        $entry = $p.Trim()
+        if ($entry.TrimEnd('\', '/') -ieq $want) { return $true }
+        $expanded = [Environment]::ExpandEnvironmentVariables($entry)
+        if ($expanded.TrimEnd('\', '/') -ieq $want) { return $true }
+    }
+    return $false
+}
+
 function Install-EveMarkets {
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue'
@@ -274,7 +287,7 @@ function Install-EveMarkets {
         }
     }
 
-    $tail = 'it serves http://localhost:8089, which you open in your browser and sign in with EVE SSO; set EVE_MARKETS_CLIENT_ID first, see the README'
+    $tail = 'it serves http://localhost:8089, which you open in your browser and sign in with EVE SSO'
     if ($inSession) {
         Write-Host "  - run: eve-markets serve ($tail)"
     } elseif ($newTerminal) {

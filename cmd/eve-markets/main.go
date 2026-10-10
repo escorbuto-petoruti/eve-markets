@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/escorbuto-petoruti/eve-markets/internal/auth"
+	"github.com/escorbuto-petoruti/eve-markets/internal/esi"
 	"github.com/escorbuto-petoruti/eve-markets/internal/sso"
 	"github.com/escorbuto-petoruti/eve-markets/internal/store"
 	"github.com/escorbuto-petoruti/eve-markets/internal/web"
@@ -50,8 +51,8 @@ Commands:
            on Windows in a terminal it opens the page in your browser (--no-open stops it, --open forces it elsewhere)
 
 Environment:
-  EVE_MARKETS_CLIENT_ID  client id of your own EVE application (required for serve;
-                         its callback must be http://localhost:8089/auth/callback)
+  EVE_MARKETS_CLIENT_ID  override the embedded EVE client id (optional; the application
+                         must register http://localhost:8089/auth/callback)
   EVE_MARKETS_DB         database path (the --db flag wins)
   EVE_MARKETS_UPDATE_API GitHub API base URL for update (tests)
 `
@@ -148,10 +149,10 @@ func newStoreTokens(st *store.Store) auth.TokenSource {
 // clientIDEnv names the environment variable holding the EVE application id.
 const clientIDEnv = "EVE_MARKETS_CLIENT_ID"
 
-// ssoConfig is the SSO configuration. The client id comes from
-// EVE_MARKETS_CLIENT_ID (every user registers their own EVE application); the
-// callback is fixed at http://localhost:8089/auth/callback, so that
-// application must register it.
+// ssoConfig is the SSO configuration. The client id is the embedded public
+// client unless EVE_MARKETS_CLIENT_ID holds a non-blank override; the callback
+// is fixed at http://localhost:8089/auth/callback, so an overriding application
+// must register it.
 func ssoConfig(getenv func(string) string) sso.Config {
 	cfg := sso.DefaultConfig()
 	if id := strings.TrimSpace(getenv(clientIDEnv)); id != "" {
@@ -162,9 +163,6 @@ func ssoConfig(getenv func(string) string) sso.Config {
 
 // esiUserAgent is the User-Agent the ESI client sends.
 func esiUserAgent() string { return "eve-markets/" + version + " (local)" }
-
-const missingClientIDMsg = "eve-markets: " + clientIDEnv + " is empty: register your own EVE application " +
-	"(callback http://localhost:8089/auth/callback) and set it to its client id; see the README\n"
 
 func runServe(ctx context.Context, args []string, d deps) int {
 	fset := newFlagSet("serve", d)
@@ -182,10 +180,6 @@ func runServe(ctx context.Context, args []string, d deps) int {
 	if err := checkLoopbackAddr(*addr); err != nil {
 		fmt.Fprintf(d.stderr, "eve-markets: %v\n", err)
 		return 2
-	}
-	if ssoConfig(d.getenv).ClientID == "" {
-		fmt.Fprint(d.stderr, missingClientIDMsg)
-		return 1
 	}
 	path, err := resolveDBPath(*dbFlag, runtime.GOOS, d.getenv)
 	if err != nil {
@@ -208,14 +202,19 @@ func runServe(ctx context.Context, args []string, d deps) int {
 	// A sign-in stores new credentials and scopes; the access token cached for
 	// that character carries the old ones.
 	var onTokenSaved func(int64)
-	if f, ok := d.newTokens(st).(interface{ Forget(int64) }); ok {
+	tokens := d.newTokens(st)
+	if f, ok := tokens.(interface{ Forget(int64) }); ok {
 		onTokenSaved = f.Forget
 	}
 
+	esiClient := esi.New(esi.Options{UserAgent: esiUserAgent()})
 	srv := &http.Server{
 		Handler: web.New(web.Deps{
 			Store:        st,
 			SSO:          d.newSSO(),
+			Markets:      esiClient,
+			Structures:   esiClient,
+			Tokens:       tokens,
 			OnTokenSaved: onTokenSaved,
 			AllowedPort:  listenPort(ln.Addr().String()),
 		}),

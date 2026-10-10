@@ -32,6 +32,44 @@
     <h2 id="characters-title">Signed-in characters</h2>
     <ul id="characters"></ul>
   </section>
+
+  <section id="market" class="card" aria-labelledby="market-title" hidden>
+    <h2 id="market-title">Public market</h2>
+    <form id="market-form" class="market-form">
+      <label>Region id <input id="market-region" type="number" min="1" value="10000002" required></label>
+      <label>Type id <input id="market-type" type="number" min="1" value="34" required></label>
+      <label>Order type
+        <select id="market-order-type">
+          <option value="all">all</option>
+          <option value="sell">sell</option>
+          <option value="buy">buy</option>
+        </select>
+      </label>
+      <button type="button" id="market-orders">Orders</button>
+      <button type="button" id="market-history">History</button>
+    </form>
+    <p class="muted">Defaults: The Forge (10000002), Tritanium (34).</p>
+    <p id="market-status" class="warn" role="status" aria-live="polite"></p>
+    <div class="table-wrap"><table id="market-table"></table></div>
+  </section>
+
+  <section id="structures" class="card" aria-labelledby="structures-title" hidden>
+    <h2 id="structures-title">Structure market</h2>
+    <form id="structure-form" class="market-form">
+      <label>Character <select id="structure-char"></select></label>
+      <label>Name search <input id="structure-q" type="search" minlength="3" placeholder="at least 3 characters"></label>
+      <button type="button" id="structure-search">Search</button>
+    </form>
+    <ul id="structure-results"></ul>
+    <form id="structure-id-form" class="market-form">
+      <label>Structure id <input id="structure-id" type="number" min="1"></label>
+      <label>Type id (optional) <input id="structure-type" type="number" min="1"></label>
+      <button type="button" id="structure-orders">Orders</button>
+    </form>
+    <p class="muted">ESI cannot list every market structure: search by name or enter an id. A character that cannot dock at the structure gets 403 (no market access).</p>
+    <p id="structure-status" class="warn" role="status" aria-live="polite"></p>
+    <div class="table-wrap"><table id="structure-table"></table></div>
+  </section>
 </main>
 <script src="/static/app.js"></script>
 </body>

@@ -136,6 +136,9 @@ func TestLoginRedirect(t *testing.T) {
 		t.Errorf("location = %s", loc.Redacted())
 	}
 	q := loc.Query()
+	if q.Get("client_id") != "cda14518a2b4474499c44f0ee75cf942" {
+		t.Errorf("client_id = %q, want the embedded public client", q.Get("client_id"))
+	}
 	if q.Get("response_type") != "code" || q.Get("client_id") != sso.DefaultClientID ||
 		q.Get("redirect_uri") != sso.DefaultRedirectURL || q.Get("code_challenge_method") != "S256" ||
 		q.Get("scope") != strings.Join(sso.MarketScopes(), " ") {
