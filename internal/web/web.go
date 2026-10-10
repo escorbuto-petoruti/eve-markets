@@ -82,6 +82,10 @@ func New(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/markets/regions/{region}/history", requireUser(s.regionHistory))
 	mux.HandleFunc("GET /api/structures/search", requireUser(s.structureSearch))
 	mux.HandleFunc("GET /api/structures/{id}/orders", requireUser(s.structureOrders))
+	mux.HandleFunc("POST /api/watch", requireUser(s.watchStructure))
+	mux.HandleFunc("POST /api/unwatch", requireUser(s.unwatchStructure))
+	mux.HandleFunc("GET /api/watched", requireUser(s.watchedList))
+	mux.HandleFunc("GET /api/demand", requireUser(s.demandSummary))
 	return s.guard(s.withSession(mux))
 }
 
@@ -90,11 +94,14 @@ var postPaths = map[string]bool{
 	"/auth/logout":         true,
 	"/auth/move-character": true,
 	"/auth/cancel-move":    true,
+	"/api/watch":           true,
+	"/api/unwatch":         true,
 }
 
 // guard sets the hardening headers on every response, refuses a Host that is not
 // the local app (DNS rebinding) and allows only GET and HEAD, except for the
-// POSTs of /auth/logout, /auth/move-character and /auth/cancel-move.
+// POSTs of /auth/logout, /auth/move-character, /auth/cancel-move,
+// /api/watch and /api/unwatch.
 func (s *server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()

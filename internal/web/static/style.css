@@ -75,13 +75,13 @@ input, select {
 }
 select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .table-wrap { overflow-x: auto; }
-#market-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: .85rem; }
-#market-table th, #market-table td { text-align: right; padding: .25rem .6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
-#market-table th:first-child, #market-table td:first-child { text-align: left; }
+#market-table, #demand-table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: .85rem; }
+#market-table th, #market-table td, #demand-table th, #demand-table td { text-align: right; padding: .25rem .6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+#market-table th:first-child, #market-table td:first-child, #demand-table th:first-child, #demand-table td:first-child { text-align: left; }
 .market-form label.inline { flex-direction: row; align-items: center; gap: 6px; }
 #structure-results { list-style: none; padding-left: 0; }
 #structure-results li { display: flex; gap: 8px; align-items: center; margin: .2rem 0; }
 .badge { font-size: .75rem; padding: .05rem .5rem; border-radius: 999px; border: 1px solid var(--border); min-width: 5.5rem; text-align: center; }
 .badge-yes { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.badge-no { color: var(--bad); }
+.badge-no_market { color: var(--bad); }
 .badge-unknown { color: var(--warn); }

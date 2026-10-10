@@ -57,20 +57,81 @@ a structure id. Orders come from `GET /markets/structures/{id}/`, filtered by
 type on the server; a large market may be cut at 100 pages and is then flagged
 as truncated.
 
-Search results carry a market access badge. A name in the list does **not**
-imply access: the app probes `GET /markets/structures/{id}/?page=1` for each
-result (at most 20 per search, 4 at a time, one orders page each) and shows
-`accessible` (200), `no access` (403 or 404) or `unknown`. Accessible
-structures are listed first, and "Only accessible" hides the rest. Definitive
-answers are remembered per character for 24 hours; "Refresh access" re-probes
-ignoring that memory. `unknown` means the check failed (network or ESI error) or
-ESI rate limited the probes, so the remaining results were not checked; it is
-never remembered, so searching again or Refresh access later retries it.
+The structure search lists the structures where the character has docking
+permission. Not all of them have a market, so each result carries a badge: the
+app probes `GET /markets/structures/{id}/?page=1` (at most 20 per search, 4 at
+a time, one orders page each) and shows `yes` (200), `no_market` ("No market",
+403 or 404: ESI refused the market read, most likely because the structure has
+no market service installed) or `unknown`. Structures with a market are listed
+first, then unknown, then no market; "Only with a market" hides the rest.
+Definitive answers are remembered per character for 24 hours; "Re-check
+markets" re-probes ignoring that memory. `unknown` means the check failed
+(network or ESI error) or ESI rate limited the probes, so the remaining
+results were not checked; it is never remembered, so searching again or
+Re-check markets later retries it.
 
-A `403 no market access to this structure (docking/ACL)` means ESI refuses that
-character: it must be allowed to dock at the structure. Pick another character
-or ask the structure owner for access. If a character was added before the
-market scopes existed, re-add it to grant them.
+ESI does not document what its 403 and 404 mean here, so the app records what
+it answered: the search results carry `market_status` (the HTTP status, 0 when
+unknown) and `market_detail` (the `error` text of ESI's body, at most 200
+printable characters), the latter shown as a tooltip on the "No market" badge.
+Answers cached before this was recorded have neither.
+
+A `403 ESI refused the market read for this structure` on the orders view has
+the same meaning: most likely the structure has no market service, or the
+character has no market access. If a character was added before the market
+scopes existed, re-add it to grant them.
+
+## Collecting watched structures
+
+ESI only shows the current orders of a structure, never history. To study what
+is demanded in a private market, press **Watch** on a search result that has
+market access. While `eve-markets serve` runs it fetches the orders of every
+watched structure on a timer, one structure at a time, with the token of the
+character that watches it.
+
+```bash
+eve-markets serve --collect-interval 15m   # default; minimum 1m, 0 disables
+```
+
+Per structure the database keeps the current open orders (`orders_current`)
+and an event log of changes between two collections (`order_events`), not full
+snapshots. The first collection of a structure only stores the baseline and
+emits no events. Event kinds:
+
+- `new`: an order appeared (delta = its remaining volume)
+- `fill`: the remaining volume dropped (delta = units filled)
+- `price`: the price changed (a volume increase alone is just an update)
+- `gone`: the order vanished (cancelled, expired or fully filled, which cannot
+  be told apart; it is never counted as a sale on its own)
+
+Each watch shows its last status: `ok`, `truncated` (the page cap was reached,
+so nothing is marked `gone`), `forbidden` (ESI refused the market read), `needs_reauth`
+(sign that character in again), `rate_limited` or `error`. After a rate limit
+the collector waits the `Retry-After` before the next run. Unwatching stops the
+collection and keeps what was stored.
+
+## Demand
+
+Under **Watched structures** the **Demand** panel summarizes what members
+buy and sell in a watched structure over the last 1, 7 or 30 days
+(`GET /api/demand?structure_id=&days=&limit=&sort=`, days 1-90, limit up to 500,
+sort by `sold_value`, `sold_units`, `open_buy_value` or `bought_value`). The
+structure must be on the watchlist of one of your characters.
+
+- **Sold units / value**: units that left sell orders (`fill` events on sell
+  orders, i.e. bought by members), valued at the order price of the event.
+- **Bought units / value**: units that were sold into buy orders.
+- **Open buy volume / value**: what the open buy orders ask for right now, so
+  an item with demand but no fills yet still shows up. **Best sell** is the
+  lowest sell price and **Best buy** the highest buy price (`-` when none).
+
+These are inferences, not trades. The collector only compares snapshots every
+`--collect-interval`, so several fills of one order between two runs add up to
+one event at the later price, and an order that appears and vanishes between
+two runs is never seen. `gone` orders are never counted as sales (they may
+have been cancelled or expired). Data starts at the first collection of the
+structure (the baseline emits no events), shown in the panel as "Collecting
+since"; fills appear from the second run.
 
 ## Development
 

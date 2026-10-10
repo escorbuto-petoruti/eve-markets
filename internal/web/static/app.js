@@ -26,6 +26,7 @@
       li.textContent = c.name;
       list.appendChild(li);
     });
+    loadWatched();
     var sel = $("structure-char");
     sel.replaceChildren();
     (me.characters || []).forEach(function (c) {
@@ -123,10 +124,10 @@
   function structStatus(text) { $("structure-status").textContent = text; }
 
   var lastHits = null;
-  var accessLabel = { yes: "accessible", no: "no access", unknown: "unknown" };
+  var accessLabel = { yes: "Market", no_market: "No market", unknown: "Unknown" };
 
-  // renderStructureHits lists lastHits (already ordered by the API: accessible
-  // first), hiding everything but "yes" when the filter is checked.
+  // renderStructureHits lists lastHits (already ordered by the API: with a market
+  // first, then unknown, then no market), hiding everything but "yes" when the filter is checked.
   function renderStructureHits() {
     var list = $("structure-results");
     list.replaceChildren();
@@ -135,21 +136,97 @@
     var shown = lastHits.filter(function (h) { return !only || h.market_access === "yes"; });
     var unknown = lastHits.filter(function (h) { return h.market_access === "unknown"; }).length;
     structStatus(shown.length + " of " + lastHits.length + (lastHits.length === 1 ? " structure" : " structures") +
-      " shown." + (unknown ? " " + unknown + " with unknown access (check failed or was rate limited); try Refresh access later." : ""));
+      " shown." + (unknown ? " " + unknown + " with an unknown market state (check failed or was rate limited); try Re-check markets later." : ""));
     shown.forEach(function (h) {
       var access = accessLabel[h.market_access] ? h.market_access : "unknown";
       var li = document.createElement("li");
       var badge = document.createElement("span");
       badge.className = "badge badge-" + access;
       badge.textContent = accessLabel[access];
+      if (access === "no_market") {
+        var tip = "ESI refused the market read (most likely no market service installed)";
+        if (h.market_status) { tip += ". ESI answered HTTP " + h.market_status + (h.market_detail ? ": " + h.market_detail : ""); }
+        badge.title = tip;
+      }
       var b = document.createElement("button");
       b.type = "button";
       b.textContent = (h.name || "(name hidden)") + " [" + h.id + "]";
       b.addEventListener("click", function () { $("structure-id").value = h.id; });
       li.appendChild(badge);
       li.appendChild(b);
+      if (access === "yes") {
+        var w = document.createElement("button");
+        w.type = "button";
+        w.textContent = "Watch";
+        w.addEventListener("click", function () { watchStructure(h); });
+        li.appendChild(w);
+      }
       list.appendChild(li);
     });
+  }
+
+  // postJSON sends a same-origin JSON POST; like getJSON it resolves null after
+  // a 401 and rejects with the API's own error message.
+  function postJSON(url, payload) {
+    return fetch(url, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (body) {
+        if (resp.status === 401) { showSignedOut("Your session expired."); return null; }
+        if (!resp.ok) { throw new Error(body.error || "HTTP " + resp.status); }
+        return body;
+      });
+    });
+  }
+
+  function watchedStatus(text) { $("watched-status").textContent = text; }
+
+  var watchStatusLabel = {
+    ok: "ok", truncated: "truncated (partial data)", forbidden: "ESI refused the market read",
+    needs_reauth: "character must sign in again", rate_limited: "rate limited", error: "error"
+  };
+
+  function renderWatched(items) {
+    renderDemandChoices(items);
+    var list = $("watched-list");
+    list.replaceChildren();
+    watchedStatus(items.length ? "" : "No watched structures yet.");
+    items.forEach(function (x) {
+      var li = document.createElement("li");
+      var label = x.last_run_at ? (watchStatusLabel[x.last_status] || x.last_status) : "not collected yet";
+      var text = (x.name || "(name hidden)") + " [" + x.structure_id + "] - " + label;
+      if (x.last_run_at) { text += ", " + new Date(x.last_run_at * 1000).toLocaleString(); }
+      text += ", " + x.order_count + (x.order_count === 1 ? " order" : " orders");
+      if (x.last_error) { text += " (" + x.last_error + ")"; }
+      var span = document.createElement("span");
+      span.textContent = text + " ";
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "Unwatch";
+      b.addEventListener("click", function () {
+        postJSON("/api/unwatch", { character_id: x.character_id, structure_id: x.structure_id })
+          .then(function (r) { if (r) { loadWatched(); } })
+          .catch(function (err) { watchedStatus("Error: " + err.message); });
+      });
+      li.appendChild(span);
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+  }
+
+  function loadWatched() {
+    return getJSON("/api/watched").then(function (items) {
+      if (items) { renderWatched(items); }
+    }).catch(function (err) { watchedStatus("Error: " + err.message); });
+  }
+
+  function watchStructure(h) {
+    postJSON("/api/watch", {
+      character_id: Number($("structure-char").value), structure_id: h.id, name: h.name || ""
+    }).then(function (r) { if (r) { loadWatched(); } })
+      .catch(function (err) { watchedStatus("Error: " + err.message); });
   }
 
   function loadStructureSearch(refresh) {
@@ -158,7 +235,7 @@
     $("structure-results").replaceChildren();
     $("structure-table").replaceChildren();
     if (q.length < 3) { structStatus("Type at least 3 characters to search."); return; }
-    structStatus(refresh ? "Re-checking access..." : "Searching...");
+    structStatus(refresh ? "Re-checking markets..." : "Searching...");
     var url = "/api/structures/search?character_id=" + encodeURIComponent($("structure-char").value) +
       "&q=" + encodeURIComponent(q) + (refresh ? "&refresh=1" : "");
     getJSON(url).then(function (hits) {
@@ -184,10 +261,77 @@
         (body.truncated ? ". Truncated: the page cap was reached, so this list is incomplete." : "."));
       renderTable(structOrderCols, rows, $("structure-table"));
     }).catch(function (err) {
-      structStatus("Error: " + err.message + (/market access/.test(err.message) ?
-        " Only characters that can dock at the structure can read its market." : ""));
+      structStatus("Error: " + err.message + (/refused the market read/.test(err.message) ?
+        " Search lists structures you can dock at; a refusal most likely means this structure has no market service." : ""));
     });
   }
+
+  var nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  var isk = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function fmtInt(n) { return nf.format(n); }
+  function fmtIsk(n) { return isk.format(n); }
+  function fmtPrice(n) { return n > 0 ? fmtIsk(n) : "-"; }
+  function fmtTime(sec) { return sec ? new Date(sec * 1000).toLocaleString() : "-"; }
+
+  var demandCols = [
+    ["Type", function (r) { return r.name ? r.name + " (" + r.type_id + ")" : r.type_id; }],
+    ["Sold units", function (r) { return fmtInt(r.sold_units); }],
+    ["Sold value", function (r) { return fmtIsk(r.sold_value); }],
+    ["Open buy volume", function (r) { return fmtInt(r.open_buy_volume); }],
+    ["Open buy value", function (r) { return fmtIsk(r.open_buy_value); }],
+    ["Best sell", function (r) { return fmtPrice(r.best_sell); }],
+    ["Best buy", function (r) { return fmtPrice(r.best_buy); }],
+    ["Last fill", function (r) { return fmtTime(r.last_fill_at); }]
+  ];
+
+  // renderDemandChoices keeps the demand selector in step with the watchlist
+  // (one entry per structure, even when two characters watch it).
+  function renderDemandChoices(items) {
+    var sel = $("demand-structure");
+    var keep = sel.value;
+    sel.replaceChildren();
+    var seen = {};
+    items.forEach(function (x) {
+      if (seen[x.structure_id]) { return; }
+      seen[x.structure_id] = true;
+      var opt = document.createElement("option");
+      opt.value = x.structure_id;
+      opt.textContent = (x.name || "(name hidden)") + " [" + x.structure_id + "]";
+      sel.appendChild(opt);
+    });
+    if (keep && seen[keep]) { sel.value = keep; }
+    $("demand-load").disabled = !sel.options.length;
+  }
+
+  function demandCoverage(meta) {
+    var text = "Collecting since " + fmtTime(meta.first_collected_at) + ", last run " + fmtTime(meta.last_run_at) +
+      ". Sales are inferred from order volume changes between runs, so short-lived orders can be missed.";
+    $("demand-coverage").textContent = text;
+  }
+
+  function loadDemand() {
+    var id = $("demand-structure").value;
+    if (!id) { $("demand-status").textContent = "Watch a structure first."; return; }
+    var url = "/api/demand?structure_id=" + encodeURIComponent(id) + "&days=" +
+      encodeURIComponent($("demand-days").value) + "&sort=" + encodeURIComponent($("demand-sort").value);
+    $("demand-status").textContent = "Loading...";
+    $("demand-coverage").textContent = "";
+    $("demand-table").replaceChildren();
+    getJSON(url).then(function (body) {
+      if (!body) { return; }
+      demandCoverage(body.meta);
+      var rows = body.rows || [];
+      if (!body.meta.total_fill_events) {
+        $("demand-status").textContent = "No fill events in this window yet: collection just started, fills appear from the second run." +
+          (rows.length ? " Showing open orders only." : "");
+      } else {
+        $("demand-status").textContent = fmtInt(body.meta.total_fill_events) + " fill events in this window.";
+      }
+      if (rows.length) { renderTable(demandCols, rows, $("demand-table")); }
+    }).catch(function (err) { $("demand-status").textContent = "Error: " + err.message; });
+  }
+
+  $("demand-form").addEventListener("submit", function (e) { e.preventDefault(); loadDemand(); });
 
   // Inline handlers are blocked by the CSP; Enter runs the matching action.
   $("structure-form").addEventListener("submit", function (e) { e.preventDefault(); loadStructureSearch(false); });

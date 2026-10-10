@@ -35,8 +35,9 @@ func (e *RateLimitError) Error() string {
 	return fmt.Sprintf("esi: rate limited (HTTP %d)", e.Status)
 }
 
-// IsForbidden reports whether err is an HTTP 403, which for structure
-// endpoints means the character has no docking or market access there.
+// IsForbidden reports whether err is an HTTP 403. ESI does not document what
+// it means for structure endpoints; for a market it most likely means the
+// structure has no market service.
 func IsForbidden(err error) bool { return hasStatus(err, http.StatusForbidden) }
 
 // IsNotFound reports whether err is an HTTP 404.
