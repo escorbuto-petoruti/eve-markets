@@ -38,3 +38,4 @@ gofmt/vet/test green; CGO_ENABLED=0 build; migrations applied on an existing DB 
 
 ## Next step
 Review/commit T1, then launch the T2 writer.
+- T1 commit: 63270d3. Review: medium (1629 lines), consent granted, reliability lens approved and acknowledged. Advisories (non-blocking): collector.go:143-162 and 85-117 (run/collect edge paths), collector_test.go:106-140 (coverage), README.md:100-101. Known deviations: a structure watched by two characters is fetched once per watch (no dedupe); last_seen only changes when a row changes. Not verified live: real ESI collection, 429 backoff, migration 3 on a real DB.
