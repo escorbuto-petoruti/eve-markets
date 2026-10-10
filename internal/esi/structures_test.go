@@ -113,3 +113,59 @@ func TestStructureOrdersTruncatedAtCap(t *testing.T) {
 		t.Fatalf("truncated=%v calls=%d err=%v", truncated, calls, err)
 	}
 }
+
+func TestProbeStructureMarket(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		want    ProbeResult
+		wantErr bool
+	}{
+		{"open", http.StatusOK, ProbeYes, false},
+		{"forbidden", http.StatusForbidden, ProbeNo, false},
+		{"not found", http.StatusNotFound, ProbeNo, false},
+		{"server error", http.StatusInternalServerError, "", true},
+		{"bad gateway", http.StatusBadGateway, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestClient(t, true, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/markets/structures/1000000000001/" {
+					t.Errorf("path = %s", r.URL.Path)
+				}
+				if got := r.URL.Query().Get("page"); got != "1" {
+					t.Errorf("page = %q, want 1", got)
+				}
+				w.WriteHeader(tc.status)
+				if tc.status == http.StatusOK {
+					_, _ = w.Write([]byte(`[]`))
+				}
+			})
+			got, err := c.ProbeStructureMarket(context.Background(), testToken, 1000000000001)
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("got %q, %v; want %q, err=%v", got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestProbeStructureMarketRateLimit(t *testing.T) {
+	for _, status := range []int{420, http.StatusTooManyRequests} {
+		c := newTestClient(t, true, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", "7")
+			w.WriteHeader(status)
+		})
+		got, err := c.ProbeStructureMarket(context.Background(), testToken, 5)
+		var rl *RateLimitError
+		if !errors.As(err, &rl) || rl.Status != status || got != "" {
+			t.Errorf("status %d: got %q, %v", status, got, err)
+		}
+	}
+}
+
+func TestProbeStructureMarketRejectsBadID(t *testing.T) {
+	c := newTestClient(t, true, func(http.ResponseWriter, *http.Request) { t.Error("no request expected") })
+	if _, err := c.ProbeStructureMarket(context.Background(), testToken, 0); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}

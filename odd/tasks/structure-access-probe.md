@@ -19,7 +19,7 @@ Live test: a name in search results does not imply market access (random structu
 - Probe cost: one orders page per structure (up to ~1000 orders), hence the cache.
 
 ## Tasks
-- [ ] T1 Probe + cache + API + UI, test-first (esi probe, store migration 2, web search handler, static UI).
+- [x] T1 Probe + cache + API + UI, test-first (esi probe, store migration 2, web search handler, static UI).
 
 ## Route declaration
 - T1: delegated (writer); trigger: 2+ non-trivial files (esi, store migration, web, ui, tests).
@@ -28,7 +28,9 @@ Live test: a name in search results does not imply market access (random structu
 gofmt/vet/test green; CGO_ENABLED=0 build; migration applied on an existing DB without data loss; live check by owner.
 
 ## Progress / evidence
-(none yet)
+- T1 (writer, uncommitted): RED observed first (esi, store and web test packages failed to compile: undefined ProbeResult/ProbeYes/ProbeNo, Get/SaveStructureAccess, esi.ProbeResult in the fake). GREEN: gofmt -l empty; go vet ./... clean; go test -count=1 ./... all ok (web also -race -count=3); CGO_ENABLED=0 go build ok; node --check app.js ok.
+  - Added: esi.ProbeStructureMarket, store migration 2 (structure_access, FK to tokens ON DELETE CASCADE) + Get/SaveStructureAccess, migration 1->2 no-data-loss test, search handler `market_access` (cache 24h via injectable Deps.Now, refresh=1, 4 workers, 20 cap, stop on first rate limit, Retry-After header), UI badges/filter/refresh, README.
+  - Not verified live: real ESI responses, rate-limit behaviour, browser rendering of the UI (owner to test).
 
 ## Next step
-Launch the T1 writer.
+Parent commits T1; owner runs the live check.

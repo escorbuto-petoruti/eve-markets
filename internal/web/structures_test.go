@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,6 +41,13 @@ type fakeStructures struct {
 	inflight    atomic.Int32
 	maxInflight atomic.Int32
 	infoCalls   atomic.Int32
+
+	// probe results by structure id; a missing id probes as "yes".
+	probe         map[int64]esi.ProbeResult
+	probeErr      map[int64]error
+	probeIDs      []int64
+	probeInflight atomic.Int32
+	probeMax      atomic.Int32
 }
 
 func (f *fakeStructures) note(token string) {
@@ -71,6 +79,35 @@ func (f *fakeStructures) Structure(_ context.Context, token string, id int64) (e
 		return esi.StructureInfo{}, err
 	}
 	return f.info[id], nil
+}
+
+func (f *fakeStructures) ProbeStructureMarket(_ context.Context, token string, id int64) (esi.ProbeResult, error) {
+	f.note(token)
+	f.mu.Lock()
+	f.probeIDs = append(f.probeIDs, id)
+	f.mu.Unlock()
+	n := f.probeInflight.Add(1)
+	defer f.probeInflight.Add(-1)
+	for {
+		m := f.probeMax.Load()
+		if n <= m || f.probeMax.CompareAndSwap(m, n) {
+			break
+		}
+	}
+	time.Sleep(5 * time.Millisecond)
+	if err := f.probeErr[id]; err != nil {
+		return "", err
+	}
+	if r, ok := f.probe[id]; ok {
+		return r, nil
+	}
+	return esi.ProbeYes, nil
+}
+
+func (f *fakeStructures) probed() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.probeIDs)
 }
 
 func (f *fakeStructures) StructureOrders(_ context.Context, token string, id int64) ([]esi.Order, bool, error) {
@@ -142,6 +179,7 @@ func TestStructureSearchResolvesNames(t *testing.T) {
 		searchIDs: []int64{101, 102, 103},
 		info:      map[int64]esi.StructureInfo{101: {Name: "Alpha"}, 103: {Name: "Gamma"}},
 		infoErr:   map[int64]error{102: &esi.APIError{Status: 403}},
+		probe:     map[int64]esi.ProbeResult{102: esi.ProbeNo, 103: esi.ProbeNo},
 	}
 	tk := &fakeTokens{}
 	f := structuresFixture(t, s, tk, allScopes()...)
@@ -154,10 +192,16 @@ func TestStructureSearchResolvesNames(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("body = %v", got)
 	}
-	if got[0]["id"] != float64(101) || got[0]["name"] != "Alpha" || got[0]["accessible"] != true {
+	for _, row := range got {
+		if _, old := row["accessible"]; old {
+			t.Errorf("legacy accessible field still present: %v", row)
+		}
+	}
+	// yes first, then no, stable within a group: 101 (yes), 102, 103 (no).
+	if got[0]["id"] != float64(101) || got[0]["name"] != "Alpha" || got[0]["market_access"] != "yes" {
 		t.Errorf("row 0 = %v", got[0])
 	}
-	if got[1]["id"] != float64(102) || got[1]["name"] != nil || got[1]["accessible"] != false {
+	if got[1]["id"] != float64(102) || got[1]["name"] != nil || got[1]["market_access"] != "no" {
 		t.Errorf("row 1 = %v", got[1])
 	}
 	if s.gotChar != 1 || s.gotQuery != "alp" || s.gotToken != "access-token-xyz" {
@@ -382,5 +426,183 @@ func TestStructureOrdersUpstreamErrors(t *testing.T) {
 		if c.code == http.StatusTooManyRequests && rec.Header().Get("Retry-After") != "7" {
 			t.Errorf("Retry-After = %q", rec.Header().Get("Retry-After"))
 		}
+	}
+}
+
+func searchRows(t *testing.T, f *fixture, target string) []map[string]any {
+	t.Helper()
+	rec := do(f.h, http.MethodGet, target)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%s status = %d: %s", target, rec.Code, rec.Body)
+	}
+	var got []map[string]any
+	decode(t, rec, &got)
+	return got
+}
+
+func accessOf(rows []map[string]any) map[int64]string {
+	out := map[int64]string{}
+	for _, r := range rows {
+		out[int64(r["id"].(float64))], _ = r["market_access"].(string)
+	}
+	return out
+}
+
+func TestStructureSearchOrdersByAccess(t *testing.T) {
+	s := &fakeStructures{
+		searchIDs: []int64{1, 2, 3, 4, 5},
+		info:      map[int64]esi.StructureInfo{1: {Name: "a"}, 2: {Name: "b"}, 3: {Name: "c"}, 4: {Name: "d"}, 5: {Name: "e"}},
+		probe:     map[int64]esi.ProbeResult{1: esi.ProbeNo, 2: esi.ProbeYes, 4: esi.ProbeNo, 5: esi.ProbeYes},
+		probeErr:  map[int64]error{3: &esi.APIError{Status: 500}},
+	}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	rows := searchRows(t, f, "/api/structures/search?character_id=1&q=abc")
+	var order []int64
+	for _, r := range rows {
+		order = append(order, int64(r["id"].(float64)))
+	}
+	if want := []int64{2, 5, 3, 1, 4}; !slices.Equal(order, want) {
+		t.Errorf("order = %v, want %v (yes, unknown, no; stable)", order, want)
+	}
+	if got := accessOf(rows); got[3] != "unknown" || got[2] != "yes" || got[1] != "no" {
+		t.Errorf("access = %v", got)
+	}
+}
+
+func TestStructureSearchCachesDefinitiveAnswersFor24h(t *testing.T) {
+	s := &fakeStructures{
+		searchIDs: []int64{1, 2, 3},
+		info:      map[int64]esi.StructureInfo{1: {Name: "a"}, 2: {Name: "b"}, 3: {Name: "c"}},
+		probe:     map[int64]esi.ProbeResult{2: esi.ProbeNo},
+		probeErr:  map[int64]error{3: &esi.APIError{Status: 502}},
+	}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	const target = "/api/structures/search?character_id=1&q=abc"
+	searchRows(t, f, target)
+	if n := len(s.probed()); n != 3 {
+		t.Fatalf("first search probed %d, want 3", n)
+	}
+	// Second search within TTL: only the transient failure (3) is probed again.
+	s.probeIDs = nil
+	s.probeErr = nil
+	f.now.Add(23 * 3600)
+	rows := searchRows(t, f, target)
+	if got := s.probed(); !slices.Equal(got, []int64{3}) {
+		t.Errorf("second search probed %v, want only [3]", got)
+	}
+	if got := accessOf(rows); got[1] != "yes" || got[2] != "no" || got[3] != "yes" {
+		t.Errorf("access = %v", got)
+	}
+	// After the TTL everything is probed again.
+	s.probeIDs = nil
+	f.now.Add(2 * 3600)
+	searchRows(t, f, target)
+	// 3 was re-probed (and cached) at 23h, so it is only 2h old here.
+	if got := s.probed(); len(got) != 2 || slices.Contains(got, 3) {
+		t.Errorf("after TTL probed %v, want [1 2] in any order", got)
+	}
+}
+
+func TestStructureSearchRefreshBypassesCache(t *testing.T) {
+	s := &fakeStructures{
+		searchIDs: []int64{1, 2},
+		info:      map[int64]esi.StructureInfo{1: {Name: "a"}, 2: {Name: "b"}},
+	}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	searchRows(t, f, "/api/structures/search?character_id=1&q=abc")
+	s.probeIDs = nil
+	searchRows(t, f, "/api/structures/search?character_id=1&q=abc")
+	if n := len(s.probed()); n != 0 {
+		t.Fatalf("cached search probed %d, want 0", n)
+	}
+	s.probe = map[int64]esi.ProbeResult{1: esi.ProbeNo}
+	rows := searchRows(t, f, "/api/structures/search?character_id=1&q=abc&refresh=1")
+	if n := len(s.probed()); n != 2 {
+		t.Errorf("refresh probed %d, want 2", n)
+	}
+	if got := accessOf(rows); got[1] != "no" {
+		t.Errorf("refresh did not update access: %v", got)
+	}
+}
+
+func TestStructureSearchCacheIsPerCharacter(t *testing.T) {
+	s := &fakeStructures{searchIDs: []int64{1}, info: map[int64]esi.StructureInfo{1: {Name: "a"}}}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	f.saveToken(t, 3, 1, "Alice Alt", allScopes())
+	searchRows(t, f, "/api/structures/search?character_id=1&q=abc")
+	s.probeIDs = nil
+	searchRows(t, f, "/api/structures/search?character_id=3&q=abc")
+	if n := len(s.probed()); n != 1 {
+		t.Errorf("other character probed %d, want 1 (cache is per character)", n)
+	}
+}
+
+func TestStructureSearchProbeCapAndConcurrency(t *testing.T) {
+	ids := make([]int64, 50)
+	info := map[int64]esi.StructureInfo{}
+	for i := range ids {
+		ids[i] = int64(1000 + i)
+		info[ids[i]] = esi.StructureInfo{Name: "S"}
+	}
+	s := &fakeStructures{searchIDs: ids, info: info}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	searchRows(t, f, "/api/structures/search?character_id=1&q=abc")
+	if n := len(s.probed()); n != 20 {
+		t.Errorf("probes = %d, want 20", n)
+	}
+	if m := s.probeMax.Load(); m > 4 || m < 2 {
+		t.Errorf("max concurrent probes = %d, want 2..4", m)
+	}
+}
+
+func TestStructureSearchRateLimitStopsProbing(t *testing.T) {
+	ids := make([]int64, 12)
+	info := map[int64]esi.StructureInfo{}
+	for i := range ids {
+		ids[i] = int64(1 + i)
+		info[ids[i]] = esi.StructureInfo{Name: "S"}
+	}
+	s := &fakeStructures{
+		searchIDs: ids, info: info,
+		probeErr: map[int64]error{1: &esi.RateLimitError{Status: 429, RetryAfter: 30 * time.Second}},
+	}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	rec := do(f.h, http.MethodGet, "/api/structures/search?character_id=1&q=abc")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "30" {
+		t.Errorf("Retry-After = %q, want 30", got)
+	}
+	var rows []map[string]any
+	decode(t, rec, &rows)
+	if len(rows) != 12 {
+		t.Fatalf("rows = %d, want all 12", len(rows))
+	}
+	if n := len(s.probed()); n > 4 {
+		t.Errorf("probes started = %d, want at most one in-flight window (4)", n)
+	}
+	if got := accessOf(rows); got[1] != "unknown" || got[12] != "unknown" {
+		t.Errorf("access = %v, want unknown for the limited and the unstarted", got)
+	}
+	// Nothing is cached from a rate-limited run.
+	s.probeIDs = nil
+	s.probeErr = nil
+	searchRows(t, f, "/api/structures/search?character_id=1&q=abc")
+	// The rate-limited and the never-started ids are probed again; the few
+	// definitive answers obtained before the limit may stay cached.
+	if got := s.probed(); !slices.Contains(got, 1) || !slices.Contains(got, 12) {
+		t.Errorf("follow-up probed %v, want ids 1 and 12 (no transient caching)", got)
+	}
+}
+
+func TestStructureSearchNameErrorStillFailsRequest(t *testing.T) {
+	s := &fakeStructures{
+		searchIDs: []int64{1},
+		infoErr:   map[int64]error{1: &esi.APIError{Status: 500}},
+	}
+	f := structuresFixture(t, s, &fakeTokens{}, allScopes()...)
+	if rec := do(f.h, http.MethodGet, "/api/structures/search?character_id=1&q=abc"); rec.Code == http.StatusOK {
+		t.Errorf("status = %d, want an error", rec.Code)
 	}
 }
