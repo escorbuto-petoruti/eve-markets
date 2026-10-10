@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/escorbuto-petoruti/eve-markets/internal/auth"
 	"github.com/escorbuto-petoruti/eve-markets/internal/esi"
@@ -24,6 +26,14 @@ const (
 	maxResolvedStructures = 20
 	// structureLookupWorkers bounds the concurrent universe/structures calls.
 	structureLookupWorkers = 4
+	// structureProbeWorkers bounds the concurrent market-access probes.
+	structureProbeWorkers = 4
+	// accessTTL is how long a yes/no market-access answer is trusted.
+	accessTTL = 24 * time.Hour
+
+	accessYes     = "yes"
+	accessNo      = "no"
+	accessUnknown = "unknown"
 )
 
 // Structures reads private structure markets. *esi.Client implements it.
@@ -31,6 +41,7 @@ type Structures interface {
 	SearchStructures(ctx context.Context, token string, characterID int64, query string) ([]int64, error)
 	Structure(ctx context.Context, token string, structureID int64) (esi.StructureInfo, error)
 	StructureOrders(ctx context.Context, token string, structureID int64) ([]esi.Order, bool, error)
+	ProbeStructureMarket(ctx context.Context, token string, structureID int64) (esi.ProbeResult, error)
 	UniverseNames(ctx context.Context, ids []int64) (map[int64]string, error)
 }
 
@@ -106,9 +117,10 @@ func structureError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 type structureHit struct {
-	ID         int64   `json:"id"`
-	Name       *string `json:"name"`
-	Accessible bool    `json:"accessible"`
+	ID   int64   `json:"id"`
+	Name *string `json:"name"`
+	// MarketAccess is yes, no or unknown (probe failed or was skipped).
+	MarketAccess string `json:"market_access"`
 }
 
 // structureSearch serves GET /api/structures/search?character_id=&q=.
@@ -146,7 +158,7 @@ func (s *server) structureSearch(w http.ResponseWriter, r *http.Request, u store
 			switch {
 			case err == nil:
 				name := info.Name
-				hits[i].Name, hits[i].Accessible = &name, true
+				hits[i].Name = &name
 			case esi.IsForbidden(err) || esi.IsNotFound(err):
 				// Inaccessible: listed without a name.
 			default:
@@ -159,7 +171,91 @@ func (s *server) structureSearch(w http.ResponseWriter, r *http.Request, u store
 		structureError(w, r, err)
 		return
 	}
+	retryAfter := s.probeAccess(r.Context(), token, charID, hits, r.URL.Query().Get("refresh") == "1")
+	if retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Round(time.Second)/time.Second)))
+	}
+	rank := func(h structureHit) int {
+		switch h.MarketAccess {
+		case accessYes:
+			return 0
+		case accessUnknown:
+			return 1
+		}
+		return 2
+	}
+	slices.SortStableFunc(hits, func(a, b structureHit) int { return rank(a) - rank(b) })
 	writeJSON(w, r, http.StatusOK, hits)
+}
+
+// probeAccess fills MarketAccess of every hit: from the cache while younger
+// than accessTTL (unless refresh), otherwise by probing with bounded
+// concurrency. Definitive answers are cached; transient failures are not and
+// leave the hit "unknown". After the first rate limit no new probe starts. It
+// returns the longest Retry-After seen, zero when none.
+func (s *server) probeAccess(ctx context.Context, token string, charID int64, hits []structureHit, refresh bool) time.Duration {
+	now := s.now()
+	var pending []int
+	for i := range hits {
+		hits[i].MarketAccess = accessUnknown
+		if !refresh {
+			acc, at, found, err := s.deps.Store.GetStructureAccess(ctx, charID, hits[i].ID)
+			if err != nil {
+				slog.Error("read structure access cache", "character_id", charID, "structure_id", hits[i].ID, "err", err)
+			} else if found && now.Sub(at) < accessTTL {
+				hits[i].MarketAccess = accessNo
+				if acc {
+					hits[i].MarketAccess = accessYes
+				}
+				continue
+			}
+		}
+		pending = append(pending, i)
+	}
+	var (
+		limited atomic.Bool
+		mu      sync.Mutex
+		wait    time.Duration
+		wg      sync.WaitGroup
+	)
+	sem := make(chan struct{}, structureProbeWorkers)
+	for _, i := range pending {
+		sem <- struct{}{}
+		if limited.Load() || ctx.Err() != nil {
+			<-sem
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			id := hits[i].ID
+			res, err := s.deps.Structures.ProbeStructureMarket(ctx, token, id)
+			if err != nil {
+				var rl *esi.RateLimitError
+				if errors.As(err, &rl) {
+					mu.Lock()
+					wait = max(wait, rl.RetryAfter)
+					mu.Unlock()
+					limited.Store(true)
+				}
+				if !errors.Is(err, context.Canceled) {
+					slog.Warn("probe structure market", "structure_id", id, "err", err)
+				}
+				return
+			}
+			yes := res == esi.ProbeYes
+			hits[i].MarketAccess = accessNo
+			if yes {
+				hits[i].MarketAccess = accessYes
+			}
+			if err := s.deps.Store.SaveStructureAccess(ctx, charID, id, yes, now); err != nil {
+				slog.Error("cache structure access", "character_id", charID, "structure_id", id, "err", err)
+			}
+		}()
+	}
+	wg.Wait()
+	return wait
 }
 
 func firstError(errs []error) error {

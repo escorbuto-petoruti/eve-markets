@@ -67,14 +67,14 @@ func TestOpenInMemory(t *testing.T) {
 	}
 }
 
-func TestSchemaHasOnlyAuthTables(t *testing.T) {
+func TestSchemaHasOnlyKnownTables(t *testing.T) {
 	s := openTemp(t)
-	for _, table := range []string{"users", "tokens", "sessions"} {
+	for _, table := range []string{"users", "tokens", "sessions", "structure_access"} {
 		if n := count(t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table); n != 1 {
 			t.Errorf("table %s missing", table)
 		}
 	}
-	if n := count(t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`); n != 3 {
-		t.Errorf("tables = %d, want 3", n)
+	if n := count(t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`); n != 4 {
+		t.Errorf("tables = %d, want 4", n)
 	}
 }

@@ -57,6 +57,16 @@ a structure id. Orders come from `GET /markets/structures/{id}/`, filtered by
 type on the server; a large market may be cut at 100 pages and is then flagged
 as truncated.
 
+Search results carry a market access badge. A name in the list does **not**
+imply access: the app probes `GET /markets/structures/{id}/?page=1` for each
+result (at most 20 per search, 4 at a time, one orders page each) and shows
+`accessible` (200), `no access` (403 or 404) or `unknown`. Accessible
+structures are listed first, and "Only accessible" hides the rest. Definitive
+answers are remembered per character for 24 hours; "Refresh access" re-probes
+ignoring that memory. `unknown` means the check failed (network or ESI error) or
+ESI rate limited the probes, so the remaining results were not checked; it is
+never remembered, so searching again or Refresh access later retries it.
+
 A `403 no market access to this structure (docking/ACL)` means ESI refuses that
 character: it must be allowed to dock at the structure. Pick another character
 or ask the structure owner for access. If a character was added before the

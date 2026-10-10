@@ -122,28 +122,49 @@
 
   function structStatus(text) { $("structure-status").textContent = text; }
 
-  function loadStructureSearch() {
-    var q = $("structure-q").value.trim();
+  var lastHits = null;
+  var accessLabel = { yes: "accessible", no: "no access", unknown: "unknown" };
+
+  // renderStructureHits lists lastHits (already ordered by the API: accessible
+  // first), hiding everything but "yes" when the filter is checked.
+  function renderStructureHits() {
     var list = $("structure-results");
     list.replaceChildren();
+    if (!lastHits) { return; }
+    var only = $("structure-only").checked;
+    var shown = lastHits.filter(function (h) { return !only || h.market_access === "yes"; });
+    var unknown = lastHits.filter(function (h) { return h.market_access === "unknown"; }).length;
+    structStatus(shown.length + " of " + lastHits.length + (lastHits.length === 1 ? " structure" : " structures") +
+      " shown." + (unknown ? " " + unknown + " with unknown access (check failed or was rate limited); try Refresh access later." : ""));
+    shown.forEach(function (h) {
+      var access = accessLabel[h.market_access] ? h.market_access : "unknown";
+      var li = document.createElement("li");
+      var badge = document.createElement("span");
+      badge.className = "badge badge-" + access;
+      badge.textContent = accessLabel[access];
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = (h.name || "(name hidden)") + " [" + h.id + "]";
+      b.addEventListener("click", function () { $("structure-id").value = h.id; });
+      li.appendChild(badge);
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+  }
+
+  function loadStructureSearch(refresh) {
+    var q = $("structure-q").value.trim();
+    lastHits = null;
+    $("structure-results").replaceChildren();
     $("structure-table").replaceChildren();
     if (q.length < 3) { structStatus("Type at least 3 characters to search."); return; }
-    structStatus("Searching...");
+    structStatus(refresh ? "Re-checking access..." : "Searching...");
     var url = "/api/structures/search?character_id=" + encodeURIComponent($("structure-char").value) +
-      "&q=" + encodeURIComponent(q);
+      "&q=" + encodeURIComponent(q) + (refresh ? "&refresh=1" : "");
     getJSON(url).then(function (hits) {
       if (!hits) { return; }
-      structStatus(hits.length + (hits.length === 1 ? " structure found" : " structures found") +
-        (hits.some(function (h) { return !h.accessible; }) ? "; unnamed ones are not accessible to this character." : "."));
-      hits.forEach(function (h) {
-        var li = document.createElement("li");
-        var b = document.createElement("button");
-        b.type = "button";
-        b.textContent = (h.name || "(no access)") + " [" + h.id + "]";
-        b.addEventListener("click", function () { $("structure-id").value = h.id; });
-        li.appendChild(b);
-        list.appendChild(li);
-      });
+      lastHits = hits;
+      renderStructureHits();
     }).catch(function (err) { structStatus("Error: " + err.message); });
   }
 
@@ -169,9 +190,11 @@
   }
 
   // Inline handlers are blocked by the CSP; Enter runs the matching action.
-  $("structure-form").addEventListener("submit", function (e) { e.preventDefault(); loadStructureSearch(); });
+  $("structure-form").addEventListener("submit", function (e) { e.preventDefault(); loadStructureSearch(false); });
   $("structure-id-form").addEventListener("submit", function (e) { e.preventDefault(); loadStructureOrders(); });
-  $("structure-search").addEventListener("click", loadStructureSearch);
+  $("structure-search").addEventListener("click", function () { loadStructureSearch(false); });
+  $("structure-refresh").addEventListener("click", function () { loadStructureSearch(true); });
+  $("structure-only").addEventListener("change", renderStructureHits);
   $("structure-orders").addEventListener("click", loadStructureOrders);
 
   $("market-orders").addEventListener("click", function () { loadMarket("orders"); });

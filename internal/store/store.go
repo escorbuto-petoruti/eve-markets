@@ -43,6 +43,15 @@ var migrations = []string{
 		expires_at INTEGER NOT NULL
 	);
 	CREATE INDEX sessions_expires ON sessions (expires_at);`,
+	// 2: cached answers of the structure market access probe, per character.
+	// Only definitive answers are stored (accessible 1 = yes, 0 = no).
+	`CREATE TABLE structure_access (
+		character_id INTEGER NOT NULL REFERENCES tokens(character_id) ON DELETE CASCADE,
+		structure_id INTEGER NOT NULL,
+		accessible   INTEGER NOT NULL,
+		checked_at   INTEGER NOT NULL,
+		PRIMARY KEY (character_id, structure_id)
+	);`,
 }
 
 // Store is a SQLite-backed store.

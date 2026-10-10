@@ -81,3 +81,33 @@ func (c *Client) StructureOrders(ctx context.Context, token string, structureID 
 	}
 	return c.pagedOrders(ctx, token, "/markets/structures/"+strconv.FormatInt(structureID, 10)+"/", nil)
 }
+
+// ProbeResult is the outcome of a definitive market-access probe.
+type ProbeResult string
+
+// Definitive probe outcomes. Anything else is an error, never cached.
+const (
+	ProbeYes ProbeResult = "yes"
+	ProbeNo  ProbeResult = "no"
+)
+
+// ProbeStructureMarket asks whether the token's character can read the market
+// of a structure by requesting only the first orders page (scope
+// esi-markets.structure_markets.v1); the body is ignored. 200 is ProbeYes, 403
+// and 404 are ProbeNo. A rate limit returns the *RateLimitError and any other
+// failure its error, both meaning "unknown" to the caller.
+func (c *Client) ProbeStructureMarket(ctx context.Context, token string, structureID int64) (ProbeResult, error) {
+	if structureID <= 0 {
+		return "", fmt.Errorf("%w: structure id must be positive", ErrInvalidInput)
+	}
+	q := url.Values{"page": {"1"}}
+	_, _, err := c.get(ctx, token, "/markets/structures/"+strconv.FormatInt(structureID, 10)+"/", q)
+	switch {
+	case err == nil:
+		return ProbeYes, nil
+	case IsForbidden(err) || IsNotFound(err):
+		return ProbeNo, nil
+	default:
+		return "", err
+	}
+}

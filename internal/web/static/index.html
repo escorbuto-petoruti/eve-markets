@@ -59,7 +59,10 @@
       <label>Character <select id="structure-char"></select></label>
       <label>Name search <input id="structure-q" type="search" minlength="3" placeholder="at least 3 characters"></label>
       <button type="button" id="structure-search">Search</button>
+      <button type="button" id="structure-refresh">Refresh access</button>
+      <label class="inline"><input id="structure-only" type="checkbox"> Only accessible</label>
     </form>
+    <p class="muted">Checking access reads one orders page per structure (up to 20 per search); answers are remembered for 24 hours. A name in the list does not imply market access.</p>
     <ul id="structure-results"></ul>
     <form id="structure-id-form" class="market-form">
       <label>Structure id <input id="structure-id" type="number" min="1"></label>
