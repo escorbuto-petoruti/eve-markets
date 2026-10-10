@@ -24,6 +24,15 @@ ESI exposes only current orders of a structure, no history. Demand must be infer
 - [x] T2 Demand view: per type over a window (default 7d): units filled, value, open buy volume/value, last price; API + table UI.
 - [ ] T3 Jita comparison: on-demand Jita orders per type (region orders filtered by type_id and location_id, TTL cache, bounded to the top N types of the demand view), best sell/buy vs the alliance, absolute and % differential; API + UI columns.
 
+### T3 design (assistant defaults, changeable; explorer mapping 2026-10-10)
+- Opt-in on the existing endpoint: `GET /api/demand?jita=1&jita_limit=N` (default 20, max 50). Only the first N rows of the requested sort get Jita data; other rows carry `jita: null`.
+- Hub table in code (Jita only): region 10000002, station 60003760. One `Markets.RegionOrders(ctx, region, "all", typeID)` call per type, filtered by `LocationID == station`; bounded concurrency (4).
+- Comparison: sell vs sell and buy vs buy. `diff = alliance - jita`, `pct = diff / jita * 100`; both null when either side is 0.
+- In-memory TTL cache keyed by (hub, type_id), 5 min, clock from `Deps.Now`; errors are not cached.
+- Degradation: `Markets == nil` or per-type ESI failure leaves that row's `jita` null and sets a meta status (`ok`, `partial`, `unavailable`); demand without `jita=1` is unchanged.
+- UI: Jita sell/buy and % columns, percent formatter, loading note. README: Jita subsection under Demand.
+- T3 subtasks: (a) hub table + best-price extraction + cache (unit tests), (b) handler wiring + per-type fake (web tests), (c) UI + README.
+
 ## Route declaration
 - T1, T2, T3: delegated writers, one at a time; trigger: 2+ non-trivial files each (store migration, collector, web, ui, tests).
 
@@ -42,6 +51,10 @@ gofmt/vet/test green; CGO_ENABLED=0 build; migrations applied on an existing DB 
   - Design notes: `DemandSummary` (sold value order) wraps `DemandSummarySorted` with a whitelisted sort key (needed so the cap applies after the requested sort); window is inclusive on both ends (since <= at <= until); only `fill` events count; `FirstCollectedAt` = min(orders_current.first_seen, order_events.at), a lower bound of the baseline (the watch's created_at predates the first collection and is not used); `LastRunAt` = latest last_run_at over watches of the structure; no new index (existing (structure_id, type_id, at) and (structure_id, type_id) cover the GROUP BYs). `/api/demand` answers 404 "structure not found" for unwatched and foreign structures alike; type names are optional.
   - Not verified live: real collected data in the UI, browser rendering of the Demand panel (layout, number formatting), query time on a large (tens of thousands of orders, 90 days of events) database.
   - Commit: pending (parent commits).
+
+- T3 (writer, delegated): RED observed (web tests failed to compile on the missing bestPrices, compare, newQuoteCache, fetchQuotes, hubQuote). GREEN: gofmt clean; go vet ./...; go test -count=1 ./...; go test -race -count=2 ./internal/web; CGO_ENABLED=0 go build; node --check app.js, all pass.
+  - Design notes: `internal/web/jita.go` holds the hub table (Jita only), `bestPrices`, `compare`, a TTL `quoteCache` (time passed in from `Deps.Now`, mutex-guarded, errors not cached) and `fetchQuotes` (concurrency 4). Request params `jita` (0 or 1) and `jita_limit` (1-50, default 20) are validated like the others (400). Response adds `rows[].jita` (null unless data) and `meta.jita` {hub, status ok|partial|unavailable, requested, failed}, omitted without `jita=1`. The cache lives in a package-level `sync.Map` keyed by `*server` because `server` is declared in web.go, outside the allowed edit surfaces; moving it to a `server` field is a small follow-up. UI: checkbox plus Top 10/20/50 select, four columns, percent formatter, loading note and a status line for partial/unavailable.
+  - Not verified live: real Jita ESI orders (latency of up to 50 region-order calls, ESI rate limits), the Demand panel in a browser.
 
 ## Next step
 Review/commit T1, then launch the T2 writer.

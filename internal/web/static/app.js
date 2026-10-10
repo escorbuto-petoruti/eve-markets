@@ -271,6 +271,11 @@
   function fmtInt(n) { return nf.format(n); }
   function fmtIsk(n) { return isk.format(n); }
   function fmtPrice(n) { return n > 0 ? fmtIsk(n) : "-"; }
+  function fmtPct(n) { return n === null || n === undefined ? "-" : (n > 0 ? "+" : "") + n.toFixed(1) + "%"; }
+  function fmtJita(r, key, pct) {
+    if (!r.jita) { return "-"; }
+    return pct ? fmtPct(r.jita[key]) : fmtPrice(r.jita[key]);
+  }
   function fmtTime(sec) { return sec ? new Date(sec * 1000).toLocaleString() : "-"; }
 
   var demandCols = [
@@ -281,6 +286,10 @@
     ["Open buy value", function (r) { return fmtIsk(r.open_buy_value); }],
     ["Best sell", function (r) { return fmtPrice(r.best_sell); }],
     ["Best buy", function (r) { return fmtPrice(r.best_buy); }],
+    ["Jita sell", function (r) { return fmtJita(r, "best_sell", false); }],
+    ["Jita buy", function (r) { return fmtJita(r, "best_buy", false); }],
+    ["Sell vs Jita", function (r) { return fmtJita(r, "sell_pct", true); }],
+    ["Buy vs Jita", function (r) { return fmtJita(r, "buy_pct", true); }],
     ["Last fill", function (r) { return fmtTime(r.last_fill_at); }]
   ];
 
@@ -314,7 +323,9 @@
     if (!id) { $("demand-status").textContent = "Watch a structure first."; return; }
     var url = "/api/demand?structure_id=" + encodeURIComponent(id) + "&days=" +
       encodeURIComponent($("demand-days").value) + "&sort=" + encodeURIComponent($("demand-sort").value);
-    $("demand-status").textContent = "Loading...";
+    var jita = $("demand-jita").checked;
+    if (jita) { url += "&jita=1&jita_limit=" + encodeURIComponent($("demand-jita-limit").value); }
+    $("demand-status").textContent = jita ? "Loading... (fetching Jita prices can take a few seconds)" : "Loading...";
     $("demand-coverage").textContent = "";
     $("demand-table").replaceChildren();
     getJSON(url).then(function (body) {
@@ -326,6 +337,12 @@
           (rows.length ? " Showing open orders only." : "");
       } else {
         $("demand-status").textContent = fmtInt(body.meta.total_fill_events) + " fill events in this window.";
+      }
+      var jm = body.meta.jita;
+      if (jm && jm.status !== "ok") {
+        $("demand-status").textContent += jm.status === "partial" ?
+          " Jita prices are missing for " + jm.failed + " of " + jm.requested + " types (ESI errors)." :
+          " Jita prices are unavailable right now.";
       }
       if (rows.length) { renderTable(demandCols, rows, $("demand-table")); }
     }).catch(function (err) { $("demand-status").textContent = "Error: " + err.message; });

@@ -133,6 +133,24 @@ have been cancelled or expired). Data starts at the first collection of the
 structure (the baseline emits no events), shown in the panel as "Collecting
 since"; fills appear from the second run.
 
+### Jita comparison
+
+Tick **Compare with Jita** (or add `jita=1&jita_limit=N` to `/api/demand`,
+N 1-50, default 20) to compare prices with Jita IV - Moon 4 (The Forge). Only
+the first N rows of the chosen sort are compared; the others show `-`.
+
+- **Jita sell / buy**: lowest sell and highest buy price at the Jita station
+  (orders of other Forge stations are ignored). Each row also carries
+  `sell_diff`, `sell_pct`, `buy_diff` and `buy_pct` in its `jita` object.
+- **Sell vs Jita / Buy vs Jita**: sell is compared with sell and buy with buy,
+  as `(alliance - Jita) / Jita`. A positive value means the alliance is more
+  expensive. It is `-` when either side has no order.
+- Jita prices come from one ESI request per type (4 at a time) and are cached
+  in memory for 5 minutes. If ESI fails for some types their rows show `-` and
+  `meta.jita.status` is `partial`; if it fails for all (or the market client is
+  not configured) the status is `unavailable` and the demand view still loads.
+  The comparison is off unless requested.
+
 ## Development
 
 ```bash

@@ -94,6 +94,14 @@
           <option value="bought_value">Bought value</option>
         </select>
       </label>
+      <label class="inline"><input type="checkbox" id="demand-jita"> Compare with Jita</label>
+      <label>Jita rows
+        <select id="demand-jita-limit">
+          <option value="10">Top 10</option>
+          <option value="20" selected>Top 20</option>
+          <option value="50">Top 50</option>
+        </select>
+      </label>
       <button type="submit" id="demand-load">Load</button>
     </form>
     <p id="demand-coverage" class="muted" role="status" aria-live="polite"></p>
