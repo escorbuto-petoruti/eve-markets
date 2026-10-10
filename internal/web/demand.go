@@ -14,7 +14,7 @@ const (
 	defaultDemandDays  = 7
 	maxDemandDays      = 90
 	defaultDemandLimit = 100
-	maxDemandLimit     = 500
+	maxDemandLimit     = store.MaxDemandLimit
 )
 
 var demandSorts = map[string]bool{
