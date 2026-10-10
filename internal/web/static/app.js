@@ -266,17 +266,12 @@
     });
   }
 
-  var nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-  var isk = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  function fmtInt(n) { return nf.format(n); }
-  function fmtIsk(n) { return isk.format(n); }
-  function fmtPrice(n) { return n > 0 ? fmtIsk(n) : "-"; }
-  function fmtPct(n) { return n === null || n === undefined ? "-" : (n > 0 ? "+" : "") + n.toFixed(1) + "%"; }
-  function fmtJita(r, key, pct) {
-    if (!r.jita) { return "-"; }
-    return pct ? fmtPct(r.jita[key]) : fmtPrice(r.jita[key]);
-  }
-  function fmtTime(sec) { return sec ? new Date(sec * 1000).toLocaleString() : "-"; }
+  var fmt = window.EveFormat;
+  var fmtInt = fmt.fmtInt;
+  var fmtIsk = fmt.fmtIsk;
+  var fmtPrice = fmt.fmtPrice;
+  var fmtJita = fmt.fmtJita;
+  var fmtTime = fmt.fmtTime;
 
   var demandCols = [
     ["Type", function (r) { return r.name ? r.name + " (" + r.type_id + ")" : r.type_id; }],

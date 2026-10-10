@@ -25,6 +25,14 @@ jobs:
             exit 1
           fi
       - run: go vet ./...
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: web helpers
+        run: |
+          node --check internal/web/static/format.js
+          node --check internal/web/static/app.js
+          node --test internal/web/jstest/*.test.js
       - run: go test ./...
       - name: install.ps1 against a fake release
         run: REQUIRE_PWSH=1 scripts/test-install-ps1.sh

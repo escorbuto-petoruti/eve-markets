@@ -16,7 +16,7 @@ import (
 	"github.com/escorbuto-petoruti/eve-markets/internal/store"
 )
 
-//go:embed static/index.html static/app.js static/style.css
+//go:embed static/index.html static/format.js static/app.js static/style.css
 var assets embed.FS
 
 // Deps are the collaborators of the handler.
@@ -132,6 +132,7 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 
 var staticTypes = map[string]string{
 	"app.js":     "text/javascript; charset=utf-8",
+	"format.js":  "text/javascript; charset=utf-8",
 	"style.css":  "text/css; charset=utf-8",
 	"index.html": "text/html; charset=utf-8",
 }
