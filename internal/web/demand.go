@@ -29,6 +29,8 @@ type demandMetaJSON struct {
 	Since            int64  `json:"since"`
 	Until            int64  `json:"until"`
 	TotalFillEvents  int64  `json:"total_fill_events"`
+	// Jita is present only when the request asked for the hub comparison.
+	Jita *jitaMetaJSON `json:"jita,omitempty"`
 }
 
 type demandRowJSON struct {
@@ -45,6 +47,8 @@ type demandRowJSON struct {
 	BestSell       float64 `json:"best_sell"`
 	BestBuy        float64 `json:"best_buy"`
 	LastFillAt     *int64  `json:"last_fill_at"`
+	// Jita is null unless the request asked for it and this row got data.
+	Jita *jitaJSON `json:"jita"`
 }
 
 // intParam reads an optional integer query parameter within [lo, hi]; an
@@ -83,6 +87,16 @@ func (s *server) demandSummary(w http.ResponseWriter, r *http.Request, u store.U
 	limit, ok := intParam(r, "limit", defaultDemandLimit, 1, maxDemandLimit)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "limit must be between 1 and 500")
+		return
+	}
+	jitaOn, ok := intParam(r, "jita", 0, 0, 1)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "jita must be 0 or 1")
+		return
+	}
+	jitaLimit, ok := intParam(r, "jita_limit", defaultJitaLimit, 1, maxJitaLimit)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "jita_limit must be between 1 and 50")
 		return
 	}
 	sortKey := store.DemandSortSoldValue
@@ -139,13 +153,17 @@ func (s *server) demandSummary(w http.ResponseWriter, r *http.Request, u store.U
 			out[i].Name = names[out[i].TypeID]
 		}
 	}
+	outMeta := demandMetaJSON{
+		FirstCollectedAt: unixPtr(meta.FirstCollectedAt), LastRunAt: unixPtr(meta.LastRunAt),
+		Since: since.Unix(), Until: until.Unix(), TotalFillEvents: meta.TotalFillEvents,
+	}
+	if jitaOn == 1 {
+		outMeta.Jita = s.attachJita(r.Context(), out, jitaLimit)
+	}
 	writeJSON(w, r, http.StatusOK, struct {
 		StructureID int64           `json:"structure_id"`
 		Name        string          `json:"name"`
 		Meta        demandMetaJSON  `json:"meta"`
 		Rows        []demandRowJSON `json:"rows"`
-	}{structureID, name, demandMetaJSON{
-		FirstCollectedAt: unixPtr(meta.FirstCollectedAt), LastRunAt: unixPtr(meta.LastRunAt),
-		Since: since.Unix(), Until: until.Unix(), TotalFillEvents: meta.TotalFillEvents,
-	}, out})
+	}{structureID, name, outMeta, out})
 }
