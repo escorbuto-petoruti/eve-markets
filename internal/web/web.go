@@ -16,7 +16,7 @@ import (
 	"github.com/escorbuto-petoruti/eve-markets/internal/store"
 )
 
-//go:embed static/index.html static/app.js static/style.css
+//go:embed static/index.html static/format.js static/app.js static/style.css
 var assets embed.FS
 
 // Deps are the collaborators of the handler.
@@ -47,6 +47,9 @@ type server struct {
 	deps  Deps
 	flows *loginFlows
 	moves *pendingMoves
+	// quotes caches Jita hub quotes for this server. It may be nil (a bare
+	// server in tests); Jita lookups then fetch uncached.
+	quotes *quoteCache
 }
 
 // tokenSaved tells the owner of the token cache that a sign-in stored new
@@ -67,6 +70,7 @@ func New(deps Deps) http.Handler {
 	s := &server{deps: deps}
 	s.flows = newLoginFlows(s.now)
 	s.moves = newPendingMoves(s.now)
+	s.quotes = newQuoteCache(quoteTTL)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{$}", s.index)
 	mux.HandleFunc("/static/{name}", s.static)
@@ -128,6 +132,7 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 
 var staticTypes = map[string]string{
 	"app.js":     "text/javascript; charset=utf-8",
+	"format.js":  "text/javascript; charset=utf-8",
 	"style.css":  "text/css; charset=utf-8",
 	"index.html": "text/html; charset=utf-8",
 }

@@ -176,6 +176,7 @@ func TestIndexAndStatic(t *testing.T) {
 	tests := []struct{ path, ctype string }{
 		{"/", "text/html"},
 		{"/static/app.js", "text/javascript"},
+		{"/static/format.js", "text/javascript"},
 		{"/static/style.css", "text/css"},
 	}
 	for _, tt := range tests {
@@ -211,7 +212,7 @@ func TestNoDirectoryListingOrUnknownPaths(t *testing.T) {
 }
 
 func TestAppFilesHaveNoExternalURLs(t *testing.T) {
-	for _, name := range []string{"static/index.html", "static/app.js", "static/style.css"} {
+	for _, name := range []string{"static/index.html", "static/format.js", "static/app.js", "static/style.css"} {
 		b, err := fs.ReadFile(assets, name)
 		if err != nil {
 			t.Fatal(err)
@@ -253,7 +254,7 @@ func (f *fixture) saveChar(t *testing.T, userID, charID int64, name string) {
 }
 
 func TestStaticAssetsAreEmbedded(t *testing.T) {
-	for _, name := range []string{"static/index.html", "static/app.js", "static/style.css"} {
+	for _, name := range []string{"static/index.html", "static/format.js", "static/app.js", "static/style.css"} {
 		if _, err := fs.ReadFile(assets, name); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}

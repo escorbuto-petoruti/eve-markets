@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"testing"
@@ -178,5 +179,35 @@ func TestDemandValidation(t *testing.T) {
 	}
 	if rec := do(f.h, http.MethodPost, "/api/demand?structure_id=500"); rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST status = %d, want 405", rec.Code)
+	}
+}
+
+// breakTable renames a table behind the store's back so that queries on it fail
+// while the rest of the database (sessions, tokens) keeps working.
+func breakTable(t *testing.T, f *fixture, table string) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`ALTER TABLE ` + table + ` RENAME TO broken_` + table); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDemandStoreFailuresAre500(t *testing.T) {
+	for _, table := range []string{"watched_structures", "order_events"} {
+		t.Run(table, func(t *testing.T) {
+			f := demandFixture(t, &fakeStructures{})
+			breakTable(t, f, table)
+			rec := do(f.h, http.MethodGet, "/api/demand?structure_id=500")
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body)
+			}
+			if rec.Body.String() != `{"error":"internal error"}`+"\n" {
+				t.Errorf("body = %q, want the generic message without store details", rec.Body)
+			}
+		})
 	}
 }

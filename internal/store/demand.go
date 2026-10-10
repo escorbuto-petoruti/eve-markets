@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -62,6 +63,10 @@ type DemandMeta struct {
 	TotalFillEvents int64
 }
 
+// MaxDemandLimit is the most rows DemandSummarySorted returns; larger limits
+// are clamped to it.
+const MaxDemandLimit = 500
+
 // DemandSummary is DemandSummarySorted ordered by sold value.
 func (s *Store) DemandSummary(ctx context.Context, structureID int64, since, until time.Time, limit int) ([]DemandRow, DemandMeta, error) {
 	return s.DemandSummarySorted(ctx, structureID, since, until, limit, DemandSortSoldValue)
@@ -81,7 +86,16 @@ func (s *Store) DemandSummarySorted(ctx context.Context, structureID int64, sinc
 	if limit < 1 {
 		limit = 1
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	if limit > MaxDemandLimit {
+		limit = MaxDemandLimit
+	}
+	// One read transaction keeps rows and meta on the same snapshot.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, DemandMeta{}, fmt.Errorf("store: demand summary: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `
 		WITH f AS (
 			SELECT type_id,
 				SUM(CASE WHEN is_buy = 0 THEN delta_volume ELSE 0 END)         AS sold_units,
@@ -135,9 +149,12 @@ func (s *Store) DemandSummarySorted(ctx context.Context, structureID int64, sinc
 	if err := rows.Err(); err != nil {
 		return nil, DemandMeta{}, fmt.Errorf("store: demand summary: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, DemandMeta{}, fmt.Errorf("store: demand summary: %w", err)
+	}
 	meta := DemandMeta{Since: since, Until: until}
 	var first, lastRun *int64
-	err = s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM order_events WHERE structure_id = ?1 AND kind = 'fill' AND at >= ?2 AND at <= ?3),
 			(SELECT MIN(v) FROM (

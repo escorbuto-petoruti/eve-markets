@@ -154,6 +154,22 @@ func TestDemandSummarySortAndLimit(t *testing.T) {
 	}
 }
 
+func TestDemandSummaryClampsLimit(t *testing.T) {
+	s := openTemp(t)
+	n := MaxDemandLimit + 5
+	orders := make([]StoredOrder, 0, n)
+	for i := 0; i < n; i++ {
+		orders = append(orders, openOrd(int64(i+1), int64(1000+i), false, 5, 1, 900))
+	}
+	if err := s.ApplyOrderDiff(context.Background(), 500, ts(3000), orders, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err := s.DemandSummary(context.Background(), 500, ts(0), ts(4000), MaxDemandLimit*10)
+	if err != nil || len(rows) != MaxDemandLimit {
+		t.Errorf("rows = %d, %v, want %d", len(rows), err, MaxDemandLimit)
+	}
+}
+
 func TestDemandSummaryEmptyStructure(t *testing.T) {
 	s := openTemp(t)
 	rows, meta, err := s.DemandSummary(context.Background(), 999, ts(0), ts(100), 10)

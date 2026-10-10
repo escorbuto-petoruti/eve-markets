@@ -157,6 +157,9 @@ the first N rows of the chosen sort are compared; the others show `-`.
 gofmt -l .
 go vet ./...
 go test ./...
+node --check internal/web/static/format.js
+node --check internal/web/static/app.js
+node --test internal/web/jstest/*.test.js
 ```
 
 Scaffolded from [eve-wallets](https://github.com/escorbuto-petoruti/eve-wallets); released under the license in `LICENSE`.
