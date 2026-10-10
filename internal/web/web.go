@@ -47,6 +47,9 @@ type server struct {
 	deps  Deps
 	flows *loginFlows
 	moves *pendingMoves
+	// quotes caches Jita hub quotes for this server. It may be nil (a bare
+	// server in tests); Jita lookups then fetch uncached.
+	quotes *quoteCache
 }
 
 // tokenSaved tells the owner of the token cache that a sign-in stored new
@@ -67,6 +70,7 @@ func New(deps Deps) http.Handler {
 	s := &server{deps: deps}
 	s.flows = newLoginFlows(s.now)
 	s.moves = newPendingMoves(s.now)
+	s.quotes = newQuoteCache(quoteTTL)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{$}", s.index)
 	mux.HandleFunc("/static/{name}", s.static)

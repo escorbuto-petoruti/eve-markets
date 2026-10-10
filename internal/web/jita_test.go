@@ -318,6 +318,29 @@ func TestDemandJitaCacheUsesInjectedClock(t *testing.T) {
 	}
 }
 
+func TestDemandJitaCacheIsPerServer(t *testing.T) {
+	m := jitaMarkets()
+	f := jitaFixture(t, m) // f.anon is one server; build a second over the same client
+	other := New(Deps{Store: f.st, SSO: f.sso, Now: f.clock, Structures: &fakeStructures{names: map[int64]string{34: "Tritanium", 35: "Pyerite"}}, Tokens: &fakeTokens{}, Markets: m})
+	second := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: sessionCookie, Value: f.aliceCookie})
+		other.ServeHTTP(w, r)
+	})
+	const path = "/api/demand?structure_id=500&jita=1"
+	do(f.h, http.MethodGet, path)
+	if m.total() != 2 {
+		t.Fatalf("first server calls = %d, want 2", m.total())
+	}
+	do(second, http.MethodGet, path)
+	if m.total() != 4 {
+		t.Errorf("calls after a second server = %d, want 4 (caches must not be shared)", m.total())
+	}
+	do(second, http.MethodGet, path)
+	if m.total() != 4 {
+		t.Errorf("calls after a repeat on the second server = %d, want 4 (its own cache)", m.total())
+	}
+}
+
 func TestDemandJitaValidation(t *testing.T) {
 	f := jitaFixture(t, jitaMarkets())
 	for _, q := range []string{"jita=2", "jita=x", "jita=", "jita=1&jita_limit=0", "jita=1&jita_limit=51", "jita=1&jita_limit=x"} {

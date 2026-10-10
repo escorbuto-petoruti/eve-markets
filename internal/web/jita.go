@@ -85,7 +85,12 @@ func newQuoteCache(ttl time.Duration) *quoteCache {
 	return &quoteCache{ttl: ttl, m: map[quoteKey]quoteEntry{}}
 }
 
+// get and put are no-ops on a nil cache, so a server without one fetches
+// every quote uncached.
 func (c *quoteCache) get(k quoteKey, now time.Time) (hubQuote, bool) {
+	if c == nil {
+		return hubQuote{}, false
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.m[k]
@@ -97,6 +102,9 @@ func (c *quoteCache) get(k quoteKey, now time.Time) (hubQuote, bool) {
 }
 
 func (c *quoteCache) put(k quoteKey, q hubQuote, now time.Time) {
+	if c == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.m[k] = quoteEntry{quote: q, expires: now.Add(c.ttl)}
@@ -160,15 +168,6 @@ type jitaMetaJSON struct {
 	Failed    int    `json:"failed"`
 }
 
-// jitaCaches holds one quote cache per server (there is one in production);
-// it keeps the cache out of the server struct.
-var jitaCaches sync.Map // *server -> *quoteCache
-
-func (s *server) quoteCache() *quoteCache {
-	c, _ := jitaCaches.LoadOrStore(s, newQuoteCache(quoteTTL))
-	return c.(*quoteCache)
-}
-
 // attachJita fills the jita field of the first limit rows and reports the
 // outcome. Rows beyond the limit, or whose lookup failed, keep jita nil.
 func (s *server) attachJita(ctx context.Context, rows []demandRowJSON, limit int) *jitaMetaJSON {
@@ -186,7 +185,7 @@ func (s *server) attachJita(ctx context.Context, rows []demandRowJSON, limit int
 	for i := range ids {
 		ids[i] = rows[i].TypeID
 	}
-	quotes, failed := fetchQuotes(ctx, s.deps.Markets, s.quoteCache(), h, ids, s.now())
+	quotes, failed := fetchQuotes(ctx, s.deps.Markets, s.quotes, h, ids, s.now())
 	meta.Failed = failed
 	switch {
 	case failed == n:
