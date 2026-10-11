@@ -15,11 +15,12 @@ type demandBody struct {
 	StructureID int64  `json:"structure_id"`
 	Name        string `json:"name"`
 	Meta        struct {
-		FirstCollectedAt *int64 `json:"first_collected_at"`
-		LastRunAt        *int64 `json:"last_run_at"`
-		Since            int64  `json:"since"`
-		Until            int64  `json:"until"`
-		TotalFillEvents  int64  `json:"total_fill_events"`
+		FirstCollectedAt *int64  `json:"first_collected_at"`
+		LastRunAt        *int64  `json:"last_run_at"`
+		Since            int64   `json:"since"`
+		Until            int64   `json:"until"`
+		TotalFillEvents  int64   `json:"total_fill_events"`
+		TotalSoldValue   float64 `json:"total_sold_value"`
 	} `json:"meta"`
 	Rows []struct {
 		TypeID         int64   `json:"type_id"`
@@ -88,6 +89,9 @@ func TestDemandRowsAndNames(t *testing.T) {
 	if got.Meta.Until != now.Unix() || got.Meta.Since != now.Add(-7*24*time.Hour).Unix() || got.Meta.TotalFillEvents != 1 {
 		t.Errorf("meta = %+v", got.Meta)
 	}
+	if got.Meta.TotalSoldValue != 45 {
+		t.Errorf("total_sold_value = %v, want 45", got.Meta.TotalSoldValue)
+	}
 	if got.Meta.LastRunAt == nil || *got.Meta.LastRunAt != now.Add(-time.Minute).Unix() || got.Meta.FirstCollectedAt == nil {
 		t.Errorf("meta coverage = %+v", got.Meta)
 	}
@@ -107,6 +111,10 @@ func TestDemandRowsAndNames(t *testing.T) {
 	decode(t, do(f.h, http.MethodGet, "/api/demand?structure_id=500&days=30&sort=open_buy_value&limit=1"), &got)
 	if got.Meta.TotalFillEvents != 2 || len(got.Rows) != 1 || got.Rows[0].TypeID != 34 {
 		t.Errorf("30d/open_buy_value/limit1 = %+v", got)
+	}
+	// The total covers all types, not only the returned rows: 45 + 900.
+	if got.Meta.TotalSoldValue != 945 {
+		t.Errorf("30d total_sold_value = %v, want 945", got.Meta.TotalSoldValue)
 	}
 }
 
