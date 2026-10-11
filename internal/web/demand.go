@@ -29,6 +29,9 @@ type demandMetaJSON struct {
 	Since            int64  `json:"since"`
 	Until            int64  `json:"until"`
 	TotalFillEvents  int64  `json:"total_fill_events"`
+	// TotalSoldValue is the ISK sold in the window across all types, not only
+	// the returned rows.
+	TotalSoldValue float64 `json:"total_sold_value"`
 	// Jita is present only when the request asked for the hub comparison.
 	Jita *jitaMetaJSON `json:"jita,omitempty"`
 }
@@ -156,6 +159,7 @@ func (s *server) demandSummary(w http.ResponseWriter, r *http.Request, u store.U
 	outMeta := demandMetaJSON{
 		FirstCollectedAt: unixPtr(meta.FirstCollectedAt), LastRunAt: unixPtr(meta.LastRunAt),
 		Since: since.Unix(), Until: until.Unix(), TotalFillEvents: meta.TotalFillEvents,
+		TotalSoldValue: meta.TotalSoldValue,
 	}
 	if jitaOn == 1 {
 		outMeta.Jita = s.attachJita(r.Context(), out, jitaLimit)
