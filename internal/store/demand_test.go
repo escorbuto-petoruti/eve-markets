@@ -112,6 +112,32 @@ func TestDemandSummaryAggregates(t *testing.T) {
 	}
 }
 
+func TestDemandMetaTotalSoldValue(t *testing.T) {
+	s := openTemp(t)
+	seedDemand(t, s)
+	ctx := context.Background()
+	// Sell-side fills in the window: type 34 = 10*5 + 5*4 = 70, type 36 = 3*7 =
+	// 21. The buy-side fill (60) and the fills outside the window are excluded.
+	for _, limit := range []int{100, 1} {
+		rows, meta, err := s.DemandSummary(ctx, 500, ts(2000), ts(3000), limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The total covers every type, not only the returned rows.
+		if meta.TotalSoldValue != 91 {
+			t.Errorf("limit %d: TotalSoldValue = %v, want 91 (rows %v)", limit, meta.TotalSoldValue, typeIDs(rows))
+		}
+	}
+	_, meta, err := s.DemandSummary(ctx, 600, ts(0), ts(9999), 10)
+	if err != nil || meta.TotalSoldValue != 1000 {
+		t.Errorf("other structure TotalSoldValue = %v, %v, want 1000", meta.TotalSoldValue, err)
+	}
+	_, meta, err = s.DemandSummary(ctx, 500, ts(5000), ts(6000), 10)
+	if err != nil || meta.TotalSoldValue != 0 {
+		t.Errorf("empty window TotalSoldValue = %v, %v, want 0", meta.TotalSoldValue, err)
+	}
+}
+
 func TestDemandSummaryOtherStructureIsolated(t *testing.T) {
 	s := openTemp(t)
 	seedDemand(t, s)

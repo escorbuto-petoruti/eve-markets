@@ -61,6 +61,9 @@ type DemandMeta struct {
 	LastRunAt       time.Time
 	Since, Until    time.Time
 	TotalFillEvents int64
+	// TotalSoldValue is the sum of delta_volume * price over all the sell-order
+	// fill events of the window, whatever the row limit.
+	TotalSoldValue float64
 }
 
 // MaxDemandLimit is the most rows DemandSummarySorted returns; larger limits
@@ -157,11 +160,13 @@ func (s *Store) DemandSummarySorted(ctx context.Context, structureID int64, sinc
 	err = tx.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM order_events WHERE structure_id = ?1 AND kind = 'fill' AND at >= ?2 AND at <= ?3),
+			(SELECT COALESCE(SUM(delta_volume * price), 0) FROM order_events
+				WHERE structure_id = ?1 AND kind = 'fill' AND is_buy = 0 AND at >= ?2 AND at <= ?3),
 			(SELECT MIN(v) FROM (
 				SELECT MIN(first_seen) AS v FROM orders_current WHERE structure_id = ?1
 				UNION ALL SELECT MIN(at) FROM order_events WHERE structure_id = ?1)),
 			(SELECT MAX(last_run_at) FROM watched_structures WHERE structure_id = ?1)`,
-		structureID, since.Unix(), until.Unix()).Scan(&meta.TotalFillEvents, &first, &lastRun)
+		structureID, since.Unix(), until.Unix()).Scan(&meta.TotalFillEvents, &meta.TotalSoldValue, &first, &lastRun)
 	if err != nil {
 		return nil, DemandMeta{}, fmt.Errorf("store: demand meta: %w", err)
 	}
