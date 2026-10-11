@@ -11,6 +11,8 @@
   function fmtIsk(n) { return isk.format(n); }
   function fmtPrice(n) { return n > 0 ? fmtIsk(n) : "-"; }
   function fmtPct(n) { return n === null || n === undefined ? "-" : (n > 0 ? "+" : "") + n.toFixed(1) + "%"; }
+  // fmtShare renders part as a percentage of total, "-" when total is not positive.
+  function fmtShare(part, total) { return total > 0 ? (part / total * 100).toFixed(1) + "%" : "-"; }
   function fmtJita(r, key, pct) {
     if (!r.jita) { return "-"; }
     return pct ? fmtPct(r.jita[key]) : fmtPrice(r.jita[key]);
@@ -22,6 +24,7 @@
     fmtIsk: fmtIsk,
     fmtPrice: fmtPrice,
     fmtPct: fmtPct,
+    fmtShare: fmtShare,
     fmtJita: fmtJita,
     fmtTime: fmtTime
   };

@@ -36,6 +36,20 @@ test("fmtPct signs and rounds to one decimal", () => {
   assert.equal(f.fmtPct(-4.56), "-4.6%");
 });
 
+test("fmtShare renders a percentage of the total with one decimal", () => {
+  assert.equal(f.fmtShare(96, 1000), "9.6%");
+  assert.equal(f.fmtShare(0, 1000), "0.0%");
+  assert.equal(f.fmtShare(1000, 1000), "100.0%");
+  assert.equal(f.fmtShare(1, 3), "33.3%");
+});
+
+test("fmtShare shows '-' without a positive total", () => {
+  assert.equal(f.fmtShare(5, 0), "-");
+  assert.equal(f.fmtShare(5, undefined), "-");
+  assert.equal(f.fmtShare(5, null), "-");
+  assert.equal(f.fmtShare(5, -1), "-");
+});
+
 test("fmtJita returns '-' without a Jita comparison", () => {
   assert.equal(f.fmtJita({}, "best_sell", false), "-");
   assert.equal(f.fmtJita({ jita: null }, "sell_pct", true), "-");

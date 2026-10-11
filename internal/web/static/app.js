@@ -270,13 +270,19 @@
   var fmtInt = fmt.fmtInt;
   var fmtIsk = fmt.fmtIsk;
   var fmtPrice = fmt.fmtPrice;
+  var fmtShare = fmt.fmtShare;
   var fmtJita = fmt.fmtJita;
   var fmtTime = fmt.fmtTime;
+
+  // demandTotalSold is the window total of the table on screen, set before
+  // each render so the Share column can divide by it.
+  var demandTotalSold = 0;
 
   var demandCols = [
     ["Type", function (r) { return r.name ? r.name + " (" + r.type_id + ")" : r.type_id; }],
     ["Sold units", function (r) { return fmtInt(r.sold_units); }],
     ["Sold value", function (r) { return fmtIsk(r.sold_value); }],
+    ["Share", function (r) { return fmtShare(r.sold_value, demandTotalSold); }],
     ["Open buy volume", function (r) { return fmtInt(r.open_buy_volume); }],
     ["Open buy value", function (r) { return fmtIsk(r.open_buy_value); }],
     ["Best sell", function (r) { return fmtPrice(r.best_sell); }],
@@ -327,11 +333,13 @@
       if (!body) { return; }
       demandCoverage(body.meta);
       var rows = body.rows || [];
+      demandTotalSold = body.meta.total_sold_value;
       if (!body.meta.total_fill_events) {
         $("demand-status").textContent = "No fill events in this window yet: collection just started, fills appear from the second run." +
           (rows.length ? " Showing open orders only." : "");
       } else {
-        $("demand-status").textContent = fmtInt(body.meta.total_fill_events) + " fill events in this window.";
+        $("demand-status").textContent = fmtInt(body.meta.total_fill_events) + " fill events in this window. Total sold: " +
+          fmtIsk(demandTotalSold) + " ISK.";
       }
       var jm = body.meta.jita;
       if (jm && jm.status !== "ok") {

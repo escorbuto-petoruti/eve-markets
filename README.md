@@ -120,6 +120,9 @@ structure must be on the watchlist of one of your characters.
 
 - **Sold units / value**: units that left sell orders (`fill` events on sell
   orders, i.e. bought by members), valued at the order price of the event.
+  **Share** is the row's sold value over the total sold in the window
+  (`meta.total_sold_value`, summed over all types, not only the listed rows;
+  `-` when nothing was sold). The status line shows that total.
 - **Bought units / value**: units that were sold into buy orders.
 - **Open buy volume / value**: what the open buy orders ask for right now, so
   an item with demand but no fills yet still shows up. **Best sell** is the
