@@ -50,6 +50,13 @@ type demandRowJSON struct {
 	BestSell       float64 `json:"best_sell"`
 	BestBuy        float64 `json:"best_buy"`
 	LastFillAt     *int64  `json:"last_fill_at"`
+	// Category and Group are empty, and the volumes 0, while the type metadata
+	// is unknown. UnitVolume is the hauling volume of one unit in m3 (the
+	// packaged volume when ESI has one) and SoldVolume is SoldUnits times it.
+	Category   string  `json:"category"`
+	Group      string  `json:"group"`
+	UnitVolume float64 `json:"unit_volume"`
+	SoldVolume float64 `json:"sold_volume"`
 	// Jita is null unless the request asked for it and this row got data.
 	Jita *jitaJSON `json:"jita"`
 }
@@ -154,6 +161,19 @@ func (s *server) demandSummary(w http.ResponseWriter, r *http.Request, u store.U
 		}
 		for i := range out {
 			out[i].Name = names[out[i].TypeID]
+		}
+	}
+	if len(typeIDs) > 0 && s.deps.Structures != nil {
+		metas := s.typeMetas(r.Context(), typeIDs)
+		for i := range out {
+			if m, ok := metas[out[i].TypeID]; ok {
+				out[i].Category, out[i].Group = m.CategoryName, m.GroupName
+				out[i].UnitVolume = haulVolume(m)
+				out[i].SoldVolume = float64(out[i].SoldUnits) * out[i].UnitVolume
+				if out[i].Name == "" {
+					out[i].Name = m.Name
+				}
+			}
 		}
 	}
 	outMeta := demandMetaJSON{

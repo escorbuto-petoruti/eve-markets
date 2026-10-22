@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/escorbuto-petoruti/eve-markets/internal/esi"
 	"github.com/escorbuto-petoruti/eve-markets/internal/store"
 )
 
@@ -36,6 +37,10 @@ type demandBody struct {
 		BestSell       float64 `json:"best_sell"`
 		BestBuy        float64 `json:"best_buy"`
 		LastFillAt     *int64  `json:"last_fill_at"`
+		Category       string  `json:"category"`
+		Group          string  `json:"group"`
+		UnitVolume     float64 `json:"unit_volume"`
+		SoldVolume     float64 `json:"sold_volume"`
 	} `json:"rows"`
 }
 
@@ -217,5 +222,58 @@ func TestDemandStoreFailuresAre500(t *testing.T) {
 				t.Errorf("body = %q, want the generic message without store details", rec.Body)
 			}
 		})
+	}
+}
+
+func typeMetaFake() *fakeStructures {
+	return &fakeStructures{
+		names: map[int64]string{34: "Tritanium", 35: "Pyerite"},
+		types: map[int64]esi.Type{
+			34: {Name: "Tritanium", GroupID: 18, Volume: 0.01},
+			35: {Name: "Pyerite", GroupID: 18, Volume: 0.01, PackagedVolume: 0.005},
+		},
+		groups:     map[int64]esi.Group{18: {Name: "Mineral", CategoryID: 4}},
+		categories: map[int64]esi.Category{4: {Name: "Material"}},
+	}
+}
+
+func TestDemandRowsCarryCategoryAndVolume(t *testing.T) {
+	fake := typeMetaFake()
+	f := demandFixture(t, fake)
+	var got demandBody
+	decode(t, do(f.h, http.MethodGet, "/api/demand?structure_id=500"), &got)
+	if len(got.Rows) != 2 {
+		t.Fatalf("rows = %+v", got.Rows)
+	}
+	// Pyerite sold 5 units and has a packaged volume, which wins.
+	r := got.Rows[0]
+	if r.Category != "Material" || r.Group != "Mineral" || r.UnitVolume != 0.005 || r.SoldVolume != 0.025 {
+		t.Errorf("row 0 = %+v", r)
+	}
+	// Tritanium sold nothing and falls back to its plain volume.
+	r = got.Rows[1]
+	if r.Category != "Material" || r.UnitVolume != 0.01 || r.SoldVolume != 0 {
+		t.Errorf("row 1 = %+v", r)
+	}
+	// The second request is served from the cache.
+	calls := fake.typeCalls.Load()
+	decode(t, do(f.h, http.MethodGet, "/api/demand?structure_id=500"), &got)
+	if fake.typeCalls.Load() != calls || got.Rows[0].Category != "Material" {
+		t.Errorf("type lookups after cache = %d (was %d), row = %+v", fake.typeCalls.Load(), calls, got.Rows[0])
+	}
+}
+
+func TestDemandTypeMetaUnavailableStillServes(t *testing.T) {
+	fake := typeMetaFake()
+	fake.universeErr = errors.New("esi down")
+	f := demandFixture(t, fake)
+	rec := do(f.h, http.MethodGet, "/api/demand?structure_id=500")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var got demandBody
+	decode(t, rec, &got)
+	if len(got.Rows) != 2 || got.Rows[0].Category != "" || got.Rows[0].UnitVolume != 0 || got.Rows[0].SoldUnits != 5 {
+		t.Errorf("rows = %+v", got.Rows)
 	}
 }

@@ -43,6 +43,9 @@ type Structures interface {
 	StructureOrders(ctx context.Context, token string, structureID int64) ([]esi.Order, bool, error)
 	ProbeStructureMarket(ctx context.Context, token string, structureID int64) (esi.Probe, error)
 	UniverseNames(ctx context.Context, ids []int64) (map[int64]string, error)
+	UniverseType(ctx context.Context, id int64) (esi.Type, error)
+	UniverseGroup(ctx context.Context, id int64) (esi.Group, error)
+	UniverseCategory(ctx context.Context, id int64) (esi.Category, error)
 }
 
 // characterToken validates character_id, checks that the signed-in user owns
