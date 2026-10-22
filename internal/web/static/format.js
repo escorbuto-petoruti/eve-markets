@@ -43,6 +43,28 @@
       return b.sold_value - a.sold_value;
     });
   }
+  // filterRows keeps the rows whose name, category or group contains query,
+  // ignoring case and surrounding spaces.
+  function filterRows(rows, query) {
+    var q = String(query || "").trim().toLowerCase();
+    if (!q) { return rows; }
+    return rows.filter(function (r) {
+      return [r.name, r.category, r.group].some(function (s) { return String(s || "").toLowerCase().indexOf(q) !== -1; });
+    });
+  }
+  // sortRows returns a sorted copy ordered by value(row), "asc" or "desc".
+  // Numbers compare numerically and strings case-insensitively; ties keep their
+  // order and rows without a value (null, undefined, NaN) always go last.
+  function sortRows(rows, value, dir) {
+    var sign = dir === "asc" ? 1 : -1;
+    function missing(v) { return v === null || v === undefined || v !== v; }
+    return rows.map(function (r, i) { return { r: r, v: value(r), i: i }; }).sort(function (a, b) {
+      var am = missing(a.v), bm = missing(b.v);
+      if (am || bm) { return am === bm ? a.i - b.i : (am ? 1 : -1); }
+      var c = typeof a.v === "string" ? a.v.toLowerCase().localeCompare(String(b.v).toLowerCase()) : a.v - b.v;
+      return c !== 0 ? sign * c : a.i - b.i;
+    }).map(function (x) { return x.r; });
+  }
   function fmtJita(r, key, pct) {
     if (!r.jita) { return "-"; }
     return pct ? fmtPct(r.jita[key]) : fmtPrice(r.jita[key]);
@@ -58,6 +80,8 @@
     fmtVolume: fmtVolume,
     fmtIskPerM3: fmtIskPerM3,
     groupByCategory: groupByCategory,
+    filterRows: filterRows,
+    sortRows: sortRows,
     fmtJita: fmtJita,
     fmtTime: fmtTime
   };
