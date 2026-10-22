@@ -332,3 +332,39 @@ func TestUniverseNamesErrors(t *testing.T) {
 		t.Fatalf("err = %v, want rate limit", err)
 	}
 }
+
+func TestUniverseTypeGroupCategory(t *testing.T) {
+	c := newTestClient(t, false, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/universe/types/34/":
+			io.WriteString(w, `{"type_id":34,"name":"Tritanium","group_id":18,"volume":0.01,"packaged_volume":0.005}`)
+		case "/universe/types/587/":
+			io.WriteString(w, `{"type_id":587,"name":"Rifter","group_id":25,"volume":27289.0}`)
+		case "/universe/groups/18/":
+			io.WriteString(w, `{"group_id":18,"name":"Mineral","category_id":4}`)
+		case "/universe/categories/4/":
+			io.WriteString(w, `{"category_id":4,"name":"Material"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	ctx := context.Background()
+	ty, err := c.UniverseType(ctx, 34)
+	if err != nil || ty.Name != "Tritanium" || ty.GroupID != 18 || ty.PackagedVolume != 0.005 || ty.Volume != 0.01 {
+		t.Fatalf("UniverseType = %+v, %v", ty, err)
+	}
+	if ty2, err := c.UniverseType(ctx, 587); err != nil || ty2.PackagedVolume != 0 || ty2.Volume != 27289 {
+		t.Fatalf("UniverseType without packaged volume = %+v, %v", ty2, err)
+	}
+	g, err := c.UniverseGroup(ctx, 18)
+	if err != nil || g.Name != "Mineral" || g.CategoryID != 4 {
+		t.Fatalf("UniverseGroup = %+v, %v", g, err)
+	}
+	cat, err := c.UniverseCategory(ctx, 4)
+	if err != nil || cat.Name != "Material" {
+		t.Fatalf("UniverseCategory = %+v, %v", cat, err)
+	}
+	if _, err := c.UniverseType(ctx, 999); err == nil {
+		t.Fatal("unknown type must be an error")
+	}
+}
