@@ -123,6 +123,21 @@ structure must be on the watchlist of one of your characters.
   **Share** is the row's sold value over the total sold in the window
   (`meta.total_sold_value`, summed over all types, not only the listed rows;
   `-` when nothing was sold). The status line shows that total.
+- **Category view**: with **Group by category** ticked (the default) the table
+  shows one block per item category, biggest sold value first, with the
+  category totals on its header row and the items underneath (click the
+  category to open or close it; the biggest starts open). Untick it for the
+  flat list. Rows carry `category`, `group`, `unit_volume` and `sold_volume`
+  in `/api/demand`.
+- **m3 per unit / Sold m3 / ISK per m3**: hauling volume. `m3 per unit` is the
+  packaged volume when ESI has one, else the plain volume, so ships count as
+  hauled packaged. `Sold m3` is sold units times that, and `ISK per m3` is the
+  sold value over it, a quick way to weigh transport cost against value.
+  Item metadata comes from the public ESI `/universe/types`, `groups` and
+  `categories` endpoints and is cached in the `types` table; up to 200
+  unknown items are resolved per request, so the first loads may show `-` and
+  an empty category until the cache fills. If ESI is down the table still
+  loads without them.
 - **Bought units / value**: units that were sold into buy orders.
 - **Open buy volume / value**: what the open buy orders ask for right now, so
   an item with demand but no fills yet still shows up. **Best sell** is the

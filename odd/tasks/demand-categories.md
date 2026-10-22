@@ -18,7 +18,10 @@ Branch: feat/demand-categories.
 - [x] T1 S3 ESI client: type, group, category lookups (test-first). Commit f91fefe.
 - [x] T2 S3 Store: `types` cache table + migration + upsert/get (test-first). Risk: schema addition. Verified on a copy of the live DB: v4 to v5, 192139 events kept, bak-v4 written.
 - [x] T3 S1,S2 API: rows gain `category`, `group`, `unit_volume`, `sold_volume`; lazy fill (test-first). go test ./... and -race on web pass.
-- [ ] T4 S1,S2,S4 UI: grouped view, m³ and ISK/m³ columns, format.js helpers + node tests, README.
+- [x] T4 S1,S2,S4 UI: grouped view, m³ and ISK/m³ columns, format.js helpers + node tests, README. Node tests (13) and go test pass; DOM rendering not exercised in a browser.
+
+## Delivery
+- Slice 1 = T1-T3 (backend, commits f91fefe, 6db08ff, af0e3a7; about 500 lines, mostly tests). Slice 2 = T4 (UI, docs). Push and PR stay the user's decision.
 
 ## Log
 - L1 (user, 2026-10-22) "podriamos hacer algo para mejorar la visualización de que se está consumiendo en los mercados privados"

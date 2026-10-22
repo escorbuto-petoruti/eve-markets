@@ -271,6 +271,8 @@
   var fmtIsk = fmt.fmtIsk;
   var fmtPrice = fmt.fmtPrice;
   var fmtShare = fmt.fmtShare;
+  var fmtVolume = fmt.fmtVolume;
+  var fmtIskPerM3 = fmt.fmtIskPerM3;
   var fmtJita = fmt.fmtJita;
   var fmtTime = fmt.fmtTime;
 
@@ -283,6 +285,9 @@
     ["Sold units", function (r) { return fmtInt(r.sold_units); }],
     ["Sold value", function (r) { return fmtIsk(r.sold_value); }],
     ["Share", function (r) { return fmtShare(r.sold_value, demandTotalSold); }],
+    ["m3 per unit", function (r) { return fmtVolume(r.unit_volume); }],
+    ["Sold m3", function (r) { return fmtVolume(r.sold_volume); }],
+    ["ISK per m3", function (r) { return fmtIskPerM3(r.sold_value, r.sold_volume); }],
     ["Open buy volume", function (r) { return fmtInt(r.open_buy_volume); }],
     ["Open buy value", function (r) { return fmtIsk(r.open_buy_value); }],
     ["Best sell", function (r) { return fmtPrice(r.best_sell); }],
@@ -293,6 +298,82 @@
     ["Buy vs Jita", function (r) { return fmtJita(r, "buy_pct", true); }],
     ["Last fill", function (r) { return fmtTime(r.last_fill_at); }]
   ];
+
+  // demandGroupCells fill the category row of the grouped view by column
+  // title; the columns not listed stay empty because they do not add up.
+  var demandGroupCells = {
+    "Sold units": function (g) { return fmtInt(g.sold_units); },
+    "Sold value": function (g) { return fmtIsk(g.sold_value); },
+    "Share": function (g) { return fmtShare(g.sold_value, demandTotalSold); },
+    "Sold m3": function (g) { return fmtVolume(g.sold_volume); },
+    "ISK per m3": function (g) { return fmtIskPerM3(g.sold_value, g.sold_volume); },
+    "Open buy value": function (g) { return fmtIsk(g.open_buy_value); }
+  };
+
+  // renderDemandGrouped shows one collapsible block per category: a totals row
+  // and, underneath, the items of that category. The biggest one starts open.
+  function renderDemandGrouped(rows, table) {
+    table.replaceChildren();
+    var head = document.createElement("tr");
+    demandCols.forEach(function (c) {
+      var th = document.createElement("th");
+      th.textContent = c[0];
+      head.appendChild(th);
+    });
+    var thead = document.createElement("thead");
+    thead.appendChild(head);
+    table.appendChild(thead);
+    fmt.groupByCategory(rows).forEach(function (g, i) {
+      var body = document.createElement("tbody");
+      var top = document.createElement("tr");
+      top.className = "cat-row";
+      var itemRows = [];
+      var button = document.createElement("button");
+      button.type = "button";
+      function setOpen(open) {
+        button.textContent = (open ? "- " : "+ ") + g.name + " (" + g.rows.length + ")";
+        button.setAttribute("aria-expanded", open ? "true" : "false");
+        itemRows.forEach(function (tr) { tr.hidden = !open; });
+      }
+      demandCols.forEach(function (c, col) {
+        var td = document.createElement("td");
+        if (col === 0) {
+          td.appendChild(button);
+        } else if (demandGroupCells[c[0]]) {
+          td.textContent = demandGroupCells[c[0]](g);
+        }
+        top.appendChild(td);
+      });
+      body.appendChild(top);
+      g.rows.forEach(function (row) {
+        var tr = document.createElement("tr");
+        demandCols.forEach(function (c, col) {
+          var td = document.createElement("td");
+          td.textContent = c[1](row);
+          if (col === 0 && row.group) { td.title = row.group; }
+          tr.appendChild(td);
+        });
+        itemRows.push(tr);
+        body.appendChild(tr);
+      });
+      button.addEventListener("click", function () { setOpen(button.getAttribute("aria-expanded") !== "true"); });
+      setOpen(i === 0);
+      table.appendChild(body);
+    });
+  }
+
+  // demandRows are the rows of the table on screen, kept so the grouping
+  // checkbox can redraw without another request.
+  var demandRows = [];
+
+  function renderDemand() {
+    if (!demandRows.length) { $("demand-table").replaceChildren(); return; }
+    if ($("demand-group").checked) {
+      renderDemandGrouped(demandRows, $("demand-table"));
+    } else {
+      renderTable(demandCols, demandRows, $("demand-table"));
+    }
+  }
 
   // renderDemandChoices keeps the demand selector in step with the watchlist
   // (one entry per structure, even when two characters watch it).
@@ -328,7 +409,8 @@
     if (jita) { url += "&jita=1&jita_limit=" + encodeURIComponent($("demand-jita-limit").value); }
     $("demand-status").textContent = jita ? "Loading... (fetching Jita prices can take a few seconds)" : "Loading...";
     $("demand-coverage").textContent = "";
-    $("demand-table").replaceChildren();
+    demandRows = [];
+    renderDemand();
     getJSON(url).then(function (body) {
       if (!body) { return; }
       demandCoverage(body.meta);
@@ -347,11 +429,13 @@
           " Jita prices are missing for " + jm.failed + " of " + jm.requested + " types (ESI errors)." :
           " Jita prices are unavailable right now.";
       }
-      if (rows.length) { renderTable(demandCols, rows, $("demand-table")); }
+      demandRows = rows;
+      renderDemand();
     }).catch(function (err) { $("demand-status").textContent = "Error: " + err.message; });
   }
 
   $("demand-form").addEventListener("submit", function (e) { e.preventDefault(); loadDemand(); });
+  $("demand-group").addEventListener("change", renderDemand);
 
   // Inline handlers are blocked by the CSP; Enter runs the matching action.
   $("structure-form").addEventListener("submit", function (e) { e.preventDefault(); loadStructureSearch(false); });
