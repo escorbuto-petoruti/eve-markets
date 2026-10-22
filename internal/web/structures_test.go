@@ -33,6 +33,11 @@ type fakeStructures struct {
 	ordersErr   error
 	names       map[int64]string
 	namesErr    error
+	types       map[int64]esi.Type
+	groups      map[int64]esi.Group
+	categories  map[int64]esi.Category
+	universeErr error
+	typeCalls   atomic.Int32
 	gotToken    string
 	gotChar     int64
 	gotQuery    string
@@ -125,6 +130,28 @@ func (f *fakeStructures) StructureOrders(_ context.Context, token string, id int
 
 func (f *fakeStructures) UniverseNames(_ context.Context, ids []int64) (map[int64]string, error) {
 	return f.names, f.namesErr
+}
+
+func (f *fakeStructures) UniverseType(_ context.Context, id int64) (esi.Type, error) {
+	f.typeCalls.Add(1)
+	if t, ok := f.types[id]; ok && f.universeErr == nil {
+		return t, nil
+	}
+	return esi.Type{}, errors.New("esi: type unavailable")
+}
+
+func (f *fakeStructures) UniverseGroup(_ context.Context, id int64) (esi.Group, error) {
+	if g, ok := f.groups[id]; ok && f.universeErr == nil {
+		return g, nil
+	}
+	return esi.Group{}, errors.New("esi: group unavailable")
+}
+
+func (f *fakeStructures) UniverseCategory(_ context.Context, id int64) (esi.Category, error) {
+	if c, ok := f.categories[id]; ok && f.universeErr == nil {
+		return c, nil
+	}
+	return esi.Category{}, errors.New("esi: category unavailable")
 }
 
 type fakeTokens struct {

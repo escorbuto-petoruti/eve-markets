@@ -71,3 +71,34 @@ test("fmtTime renders epoch seconds with the runtime locale", () => {
   // against the same call instead of a fixed string.
   assert.equal(f.fmtTime(1700000000), new Date(1700000000 * 1000).toLocaleString());
 });
+
+test("fmtVolume shows m3 with up to two decimals and hides non-positive volumes", () => {
+  assert.equal(f.fmtVolume(0), "-");
+  assert.equal(f.fmtVolume(undefined), "-");
+  assert.equal(f.fmtVolume(0.005), "0.01");
+  assert.equal(f.fmtVolume(1234567.891), "1,234,567.89");
+});
+
+test("fmtIskPerM3 divides value by volume and hides a missing volume", () => {
+  assert.equal(f.fmtIskPerM3(1000, 4), "250.00");
+  assert.equal(f.fmtIskPerM3(1000, 0), "-");
+  assert.equal(f.fmtIskPerM3(1000, undefined), "-");
+});
+
+test("groupByCategory totals each category, biggest sold value first, unknown last", () => {
+  const rows = [
+    { type_id: 1, category: "Charge", sold_units: 10, sold_value: 100, sold_volume: 1, open_buy_value: 5 },
+    { type_id: 2, category: "", sold_units: 1, sold_value: 900, sold_volume: 0, open_buy_value: 0 },
+    { type_id: 3, category: "Material", sold_units: 5, sold_value: 300, sold_volume: 2, open_buy_value: 0 },
+    { type_id: 4, category: "Charge", sold_units: 20, sold_value: 250, sold_volume: 3, open_buy_value: 7 }
+  ];
+  const groups = f.groupByCategory(rows);
+  assert.deepEqual(groups.map((g) => g.name), ["Charge", "Material", "Unknown"]);
+  const charge = groups[0];
+  assert.equal(charge.sold_units, 30);
+  assert.equal(charge.sold_value, 350);
+  assert.equal(charge.sold_volume, 4);
+  assert.equal(charge.open_buy_value, 12);
+  assert.deepEqual(charge.rows.map((r) => r.type_id), [1, 4]);
+  assert.deepEqual(f.groupByCategory([]), []);
+});

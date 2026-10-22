@@ -69,12 +69,12 @@ func TestOpenInMemory(t *testing.T) {
 
 func TestSchemaHasOnlyKnownTables(t *testing.T) {
 	s := openTemp(t)
-	for _, table := range []string{"users", "tokens", "sessions", "structure_access", "watched_structures", "orders_current", "order_events"} {
+	for _, table := range []string{"users", "tokens", "sessions", "structure_access", "watched_structures", "orders_current", "order_events", "types"} {
 		if n := count(t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table); n != 1 {
 			t.Errorf("table %s missing", table)
 		}
 	}
-	if n := count(t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`); n != 7 {
-		t.Errorf("tables = %d, want 7", n)
+	if n := count(t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`); n != 8 {
+		t.Errorf("tables = %d, want 8", n)
 	}
 }

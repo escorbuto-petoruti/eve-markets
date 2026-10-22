@@ -99,6 +99,17 @@ var migrations = []string{
 	// text of its body). Rows stored before this migration keep NULL.
 	`ALTER TABLE structure_access ADD COLUMN http_status INTEGER;
 		ALTER TABLE structure_access ADD COLUMN detail TEXT;`,
+	// 5: cache of public item metadata (name, group, category, volumes).
+	`CREATE TABLE types (
+		type_id         INTEGER PRIMARY KEY,
+		name            TEXT NOT NULL,
+		group_id        INTEGER NOT NULL,
+		group_name      TEXT NOT NULL,
+		category_id     INTEGER NOT NULL,
+		category_name   TEXT NOT NULL,
+		volume          REAL NOT NULL,
+		packaged_volume REAL NOT NULL
+	);`,
 }
 
 // Store is a SQLite-backed store.
