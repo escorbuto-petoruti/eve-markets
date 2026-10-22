@@ -94,6 +94,7 @@
           <option value="bought_value">Bought value</option>
         </select>
       </label>
+      <label>Search <input id="demand-search" type="search" placeholder="item, group or category"></label>
       <label class="inline"><input type="checkbox" id="demand-group" checked> Group by category</label>
       <label class="inline"><input type="checkbox" id="demand-jita"> Compare with Jita</label>
       <label>Jita rows
@@ -107,6 +108,7 @@
     </form>
     <p id="demand-coverage" class="muted" role="status" aria-live="polite"></p>
     <p id="demand-status" class="warn" role="status" aria-live="polite"></p>
+    <p id="demand-count" class="muted" role="status" aria-live="polite"></p>
     <div class="table-wrap"><table id="demand-table"></table></div>
   </section>
 </main>

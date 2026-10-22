@@ -138,6 +138,13 @@ structure must be on the watchlist of one of your characters.
   unknown items are resolved per request, so the first loads may show `-` and
   an empty category until the cache fills. If ESI is down the table still
   loads without them.
+- **Using the grid**: the header row stays in view while you scroll down and
+  the item name stays in view while you scroll right. Click a column title to
+  sort by it (click again to flip the direction); **Search** filters the loaded
+  rows by item name, group or category as you type, and opens every matching
+  category. Both work on the rows already loaded (the top `limit` by the
+  server-side **Sort by**), so raise the limit or change **Sort by** to bring
+  other items in.
 - **Bought units / value**: units that were sold into buy orders.
 - **Open buy volume / value**: what the open buy orders ask for right now, so
   an item with demand but no fills yet still shows up. **Best sell** is the

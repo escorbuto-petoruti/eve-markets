@@ -102,3 +102,29 @@ test("groupByCategory totals each category, biggest sold value first, unknown la
   assert.deepEqual(charge.rows.map((r) => r.type_id), [1, 4]);
   assert.deepEqual(f.groupByCategory([]), []);
 });
+
+test("filterRows keeps rows whose name, category or group contains the query", () => {
+  const rows = [
+    { type_id: 1, name: "Tritanium", category: "Material", group: "Mineral" },
+    { type_id: 2, name: "Large Skill Injector", category: "Skill", group: "Booster" },
+    { type_id: 3, name: "", category: "Charge", group: "Missile" }
+  ];
+  const ids = (q) => f.filterRows(rows, q).map((r) => r.type_id);
+  assert.deepEqual(ids("  TRIT "), [1]);
+  assert.deepEqual(ids("skill"), [2]);
+  assert.deepEqual(ids("missile"), [3]);
+  assert.deepEqual(ids(""), [1, 2, 3]);
+  assert.deepEqual(ids("zzz"), []);
+});
+
+test("sortRows orders by a value function, keeps ties stable and puts missing values last", () => {
+  const rows = [
+    { id: "a", v: 2 }, { id: "b", v: null }, { id: "c", v: 5 }, { id: "d", v: 2 }
+  ];
+  const val = (r) => r.v;
+  assert.deepEqual(f.sortRows(rows, val, "desc").map((r) => r.id), ["c", "a", "d", "b"]);
+  assert.deepEqual(f.sortRows(rows, val, "asc").map((r) => r.id), ["a", "d", "c", "b"]);
+  assert.deepEqual(rows.map((r) => r.id), ["a", "b", "c", "d"], "input is not mutated");
+  const named = [{ n: "pear" }, { n: "Apple" }, { n: "fig" }];
+  assert.deepEqual(f.sortRows(named, (r) => r.n, "asc").map((r) => r.n), ["Apple", "fig", "pear"]);
+});
